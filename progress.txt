@@ -17,6 +17,9 @@
 - FlagEmbedding has no type stubs; use `# type: ignore[import-untyped]` for pyright
 - BGE-M3 model: `BGEM3FlagModel("BAAI/bge-m3", use_fp16=True)` — auto-detects GPU (CUDA/MPS/CPU)
 - `model.encode()` returns dict with `dense_vecs` key containing numpy array of shape (batch, 1024)
+- Qdrant point IDs: deterministic UUIDs via `uuid.uuid5(NAMESPACE_URL, f"{post_id}_{chunk_index}")` for idempotent upserts
+- Qdrant models: import `Distance`, `PayloadSchemaType`, `PointStruct`, `VectorParams` from `qdrant_client.models`
+- `upload_to_qdrant()` supports `recreate` flag for full vs incremental mode
 
 ---
 
@@ -78,4 +81,18 @@
   - Dense embedding dimension is 1024; max_length supported is 8192 tokens
   - `embed_chunks()` accepts configurable input/output paths and batch_size for reuse in incremental mode (US-008)
   - Embeddings saved as numpy .npy file; row count verified against chunks.json length with assert
+---
+
+## 2026-02-11 - US-006
+- What was implemented: Qdrant vector upload module `upload_to_qdrant()` in src/uploader.py
+- Files changed: src/uploader.py
+- **Learnings for future iterations:**
+  - qdrant_client models import: `Distance`, `PayloadSchemaType`, `PointStruct`, `VectorParams` from `qdrant_client.models`
+  - Use `client.collection_exists()` to check collection before create/delete
+  - Point IDs use `uuid.uuid5(NAMESPACE_URL, f"{post_id}_{chunk_index}")` for deterministic, upsert-friendly IDs
+  - `client.upsert()` is preferred over `client.upload_points()` for idempotent uploads
+  - Payload index on `category` field uses `PayloadSchemaType.KEYWORD` for filtered search
+  - Collection info access: `collection_info.config.params.vectors.size` needs `# type: ignore[union-attr]` due to union type
+  - `upload_to_qdrant()` accepts `recreate` flag for full mode (US-008) vs incremental append
+  - Chunk `author` field not present in chunk schema; use `.get("author", "")` as fallback
 ---

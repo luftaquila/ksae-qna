@@ -111,7 +111,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Use qdrant_client.QdrantClient. Categories for filtering: Baja, Formula, EV, 기술, 기타."
     },
     {
