@@ -1,0 +1,15 @@
+## Codebase Patterns
+- Use `pyright` for typechecking (available at /opt/homebrew/bin/pyright)
+- Directory structure: src/ for modules, data/raw/ for crawled data, data/processed/ for pipeline outputs
+- Dependencies listed in requirements.txt (no pyproject.toml)
+
+---
+
+## 2026-02-11 - US-001
+- What was implemented: Project directory structure and dependencies
+- Files changed: src/__init__.py, src/crawler.py, src/chunker.py, src/embedder.py, src/uploader.py, requirements.txt, data/raw/.gitkeep, data/processed/.gitkeep
+- **Learnings for future iterations:**
+  - pyright is available for typecheck, mypy is not installed
+  - Git repo was initialized fresh; main branch created, then ralph/ksae-qna-vectordb branch
+  - Each src module has a docstring describing its purpose
+---
