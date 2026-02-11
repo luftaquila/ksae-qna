@@ -66,28 +66,24 @@ def _get_soup(url: str, params: dict[str, Any] | None = None) -> BeautifulSoup:
     return BeautifulSoup(resp.text, "lxml")
 
 
-def _detect_last_page(soup: BeautifulSoup) -> int:
-    """Detect the last page number from the pagination '마지막' button.
+def _parse_list_page(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    """Parse all post rows from a list page's table.
 
-    The last page button uses an img with src containing 'block_next'.
-    Its parent anchor's href contains the page parameter.
+    Returns an empty list if no data rows are found (signals last page reached).
     """
-    block_next_img = soup.find("img", src=re.compile(r"block_next"))
-    if not block_next_img:
-        return 1
+    table = soup.find("table")
+    if not table or not isinstance(table, Tag):
+        return []
 
-    parent_a = block_next_img.parent
-    if not isinstance(parent_a, Tag) or parent_a.name != "a":
-        return 1
-
-    href = parent_a.get("href", "")
-    if isinstance(href, list):
-        href = href[0]
-
-    parsed = urlparse(str(href))
-    qs = parse_qs(parsed.query)
-    page_values = qs.get("page", ["1"])
-    return int(page_values[0])
+    posts: list[dict[str, Any]] = []
+    rows = table.find_all("tr")
+    for row in rows:
+        if not isinstance(row, Tag):
+            continue
+        post = _parse_list_row(row)
+        if post:
+            posts.append(post)
+    return posts
 
 
 def _parse_list_row(row: Tag) -> dict[str, Any] | None:
@@ -159,8 +155,14 @@ def _parse_list_row(row: Tag) -> dict[str, Any] | None:
     }
 
 
+
+    
 def crawl_list_pages(delay: float = DEFAULT_DELAY) -> list[dict[str, Any]]:
     """Crawl all list pages of the KSAE Q&A board.
+
+    This function is resumable. It saves its progress after each page
+    to `data/raw/post_list.json` and `data/raw/.crawl_progress.json`.
+    If the process is interrupted, it will resume from the last saved page.
 
     Returns a list of post metadata dicts with keys:
     id, number, category, title, author, views, date, detail_url.
@@ -168,46 +170,67 @@ def crawl_list_pages(delay: float = DEFAULT_DELAY) -> list[dict[str, Any]]:
     Args:
         delay: Seconds to wait between requests to avoid server overload.
     """
-    logger.info("Detecting last page number...")
-    first_page_soup = _get_soup(LIST_URL, params={"code": "J_qna", "page": "1"})
-    last_page = _detect_last_page(first_page_soup)
-    logger.info("Last page: %d", last_page)
+    output_path = Path("data/raw/post_list.json")
+    progress_file = Path("data/raw/.crawl_progress.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    start_page = 1
     all_posts: list[dict[str, Any]] = []
 
-    for page_num in range(1, last_page + 1):
-        logger.info("Crawling list page %d/%d...", page_num, last_page)
+    if progress_file.exists():
+        try:
+            progress = json.loads(progress_file.read_text(encoding="utf-8"))
+            last_page = progress.get("last_page", 0)
+            if last_page > 0:
+                start_page = last_page + 1
+                logger.info("Resuming crawl from page %d", start_page)
+                if output_path.exists():
+                    all_posts = json.loads(output_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, FileNotFoundError):
+            logger.warning("Could not read progress file, starting from page 1.")
 
-        if page_num == 1:
-            soup = first_page_soup
-        else:
-            time.sleep(delay)
+    page_num = start_page
+    while True:
+        logger.info("Crawling list page %d...", page_num)
+
+        try:
             soup = _get_soup(LIST_URL, params={"code": "J_qna", "page": str(page_num)})
+        except requests.RequestException as e:
+            logger.error("Failed to fetch page %d: %s. Stopping.", page_num, e)
+            # Do not delete progress file, so it can be resumed
+            return all_posts
 
-        # Find all table rows
-        table = soup.find("table")
-        if not table or not isinstance(table, Tag):
-            logger.warning("No table found on page %d", page_num)
-            continue
+        posts_on_page = _parse_list_page(soup)
 
-        rows = table.find_all("tr")
-        for row in rows:
-            if not isinstance(row, Tag):
-                continue
-            post = _parse_list_row(row)
-            if post:
-                all_posts.append(post)
+        if not posts_on_page and page_num > start_page:
+            logger.info("No more posts found on page %d. Stopping.", page_num)
+            break
 
-    logger.info("Total posts collected: %d", len(all_posts))
+        existing_ids = {post["id"] for post in all_posts}
+        new_posts = [post for post in posts_on_page if post["id"] not in existing_ids]
+        all_posts.extend(new_posts)
 
-    # Save intermediate metadata
-    output_path = Path("data/raw/post_list.json")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(all_posts, f, ensure_ascii=False, indent=2)
-    logger.info("Saved post list to %s", output_path)
+        # Save progress after each page
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(all_posts, f, ensure_ascii=False, indent=2)
+            with open(progress_file, "w", encoding="utf-8") as f:
+                json.dump({"last_page": page_num}, f, indent=2)
+        except IOError as e:
+            logger.error("Failed to save progress on page %d: %s", page_num, e)
+            return all_posts # Return what we have so far
+
+        page_num += 1
+        time.sleep(delay)
+
+    logger.info("Crawl finished. Total posts collected: %d", len(all_posts))
+
+    # Clean up progress file on successful completion
+    if progress_file.exists():
+        progress_file.unlink()
 
     return all_posts
+
 
 
 def filter_new_posts(post_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
