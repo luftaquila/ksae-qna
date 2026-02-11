@@ -51,19 +51,21 @@ def _run_stage(name: str, func: object, **kwargs: object) -> None:
 
 @click.group(invoke_without_command=True)
 @click.option("--qdrant-url", default="http://localhost:6333", help="Qdrant server URL.")
+@click.option("--qdrant-api-key", default=None, help="Qdrant API key.")
 @click.option("--collection", default="ksae-qna", help="Qdrant collection name.")
 @click.option("--batch-size", default=32, type=int, help="Embedding batch size.")
 @click.option("--embed-url", default=None, help="BGE-M3 embedding API URL. If not set, uses local model.")
 @click.option("--delay", default=1.5, type=float, help="Delay between requests (seconds).")
 @click.option("--mode", default="incremental", type=click.Choice(["full", "incremental"]), help="Crawl mode: full or incremental (default: incremental).")
 @click.pass_context
-def cli(ctx: click.Context, qdrant_url: str, collection: str, batch_size: int, embed_url: str, delay: float, mode: str) -> None:
+def cli(ctx: click.Context, qdrant_url: str, qdrant_api_key: str | None, collection: str, batch_size: int, embed_url: str, delay: float, mode: str) -> None:
     """KSAE Q&A VectorDB Pipeline.
 
     Run the full pipeline (crawl -> chunk -> embed -> upload) or individual stages.
     """
     ctx.ensure_object(dict)
     ctx.obj["qdrant_url"] = qdrant_url
+    ctx.obj["qdrant_api_key"] = qdrant_api_key
     ctx.obj["collection"] = collection
     ctx.obj["batch_size"] = batch_size
     ctx.obj["embed_url"] = embed_url
@@ -72,10 +74,10 @@ def cli(ctx: click.Context, qdrant_url: str, collection: str, batch_size: int, e
 
     if ctx.invoked_subcommand is None:
         # Run full pipeline
-        _run_full_pipeline(qdrant_url, collection, batch_size, embed_url, delay, mode)
+        _run_full_pipeline(qdrant_url, qdrant_api_key, collection, batch_size, embed_url, delay, mode)
 
 
-def _run_full_pipeline(qdrant_url: str, collection: str, batch_size: int, embed_url: str, delay: float, mode: str = "incremental") -> None:
+def _run_full_pipeline(qdrant_url: str, qdrant_api_key: str | None, collection: str, batch_size: int, embed_url: str, delay: float, mode: str = "incremental") -> None:
     """Execute the full pipeline: crawl -> chunk -> embed -> upload."""
     import json
 
@@ -106,7 +108,7 @@ def _run_full_pipeline(qdrant_url: str, collection: str, batch_size: int, embed_
 
     _run_stage("chunk", chunk_posts)
     _run_stage("embed", embed_chunks, batch_size=batch_size, embed_url=embed_url)
-    _run_stage("upload", upload_to_qdrant, qdrant_url=qdrant_url, collection_name=collection, recreate=not is_incremental)
+    _run_stage("upload", upload_to_qdrant, qdrant_url=qdrant_url, api_key=qdrant_api_key, collection_name=collection, recreate=not is_incremental)
 
     total_elapsed = time.time() - total_start
     click.echo(f"Full pipeline completed in {total_elapsed:.1f}s")
@@ -169,8 +171,9 @@ def upload(ctx: click.Context) -> None:
     from src.uploader import upload_to_qdrant
 
     qdrant_url: str = ctx.obj["qdrant_url"]
+    qdrant_api_key: str | None = ctx.obj["qdrant_api_key"]
     collection: str = ctx.obj["collection"]
-    _run_stage("upload", upload_to_qdrant, qdrant_url=qdrant_url, collection_name=collection)
+    _run_stage("upload", upload_to_qdrant, qdrant_url=qdrant_url, api_key=qdrant_api_key, collection_name=collection)
 
 
 if __name__ == "__main__":

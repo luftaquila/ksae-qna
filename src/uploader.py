@@ -33,6 +33,7 @@ def upload_to_qdrant(
     chunks_path: str | Path = "data/processed/chunks.json",
     embeddings_path: str | Path = "data/processed/embeddings.npy",
     qdrant_url: str = DEFAULT_QDRANT_URL,
+    api_key: str | None = None,
     collection_name: str = DEFAULT_COLLECTION,
     batch_size: int = DEFAULT_BATCH_SIZE,
     recreate: bool = False,
@@ -74,7 +75,16 @@ def upload_to_qdrant(
         return
 
     # Connect to Qdrant
-    client = QdrantClient(url=qdrant_url)
+    is_https = qdrant_url.startswith("https")
+    host = qdrant_url.replace("https://", "").replace("http://", "").rstrip("/")
+    client = QdrantClient(
+        host=host,
+        port=443 if is_https else 6333,
+        https=is_https,
+        api_key=api_key,
+        prefer_grpc=False,
+        timeout=60,
+    )
     logger.info("Connected to Qdrant at %s", qdrant_url)
 
     # Create or reuse collection
