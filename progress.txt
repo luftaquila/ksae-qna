@@ -20,6 +20,8 @@
 - Qdrant point IDs: deterministic UUIDs via `uuid.uuid5(NAMESPACE_URL, f"{post_id}_{chunk_index}")` for idempotent upserts
 - Qdrant models: import `Distance`, `PayloadSchemaType`, `PointStruct`, `VectorParams` from `qdrant_client.models`
 - `upload_to_qdrant()` supports `recreate` flag for full vs incremental mode
+- CLI entry point: `main.py` with click group; `python main.py` runs full pipeline, `python main.py <stage>` runs individual stage
+- Global CLI options (--qdrant-url, --collection, --batch-size, --delay) are passed via `ctx.obj` dict
 
 ---
 
@@ -95,4 +97,16 @@
   - Collection info access: `collection_info.config.params.vectors.size` needs `# type: ignore[union-attr]` due to union type
   - `upload_to_qdrant()` accepts `recreate` flag for full mode (US-008) vs incremental append
   - Chunk `author` field not present in chunk schema; use `.get("author", "")` as fallback
+---
+
+## 2026-02-11 - US-007
+- What was implemented: CLI pipeline integration with click CLI group in main.py
+- Files changed: main.py
+- **Learnings for future iterations:**
+  - `click.group(invoke_without_command=True)` runs full pipeline when no subcommand given
+  - `ctx.ensure_object(dict)` + `ctx.obj` is used to pass global options to subcommands
+  - Lazy imports (inside functions) keep CLI responsive; heavy dependencies only load when needed
+  - `_run_stage()` helper wraps each stage with timing, logging, and error handling; calls `sys.exit(1)` on failure to preserve intermediate results
+  - The crawl stage requires two steps: list pages first, then reading post_list.json back to pass to detail crawling
+  - All stage functions accept configurable paths/params, making them easy to wire into the CLI
 ---
