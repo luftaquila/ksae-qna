@@ -2,6 +2,11 @@
 - Use `pyright` for typechecking (available at /opt/homebrew/bin/pyright)
 - Directory structure: src/ for modules, data/raw/ for crawled data, data/processed/ for pipeline outputs
 - Dependencies listed in requirements.txt (no pyproject.toml)
+- KSAE board HTML: table rows have 7 td cells (번호, 구분, 제목, 등록자, 파일, 조회수, 등록일)
+- Pagination '마지막' button: `img[src*="block_next"]` inside an `<a>` tag; parse `page` param from href
+- Post detail URL uses a `number` param (from the href) which differs from the display `번호` column
+- Direct Python requests to www.ksae.org may time out; WebFetch tool works as alternative for analysis
+- Use `from __future__ import annotations` for modern type hint syntax compatibility
 
 ---
 
@@ -12,4 +17,16 @@
   - pyright is available for typecheck, mypy is not installed
   - Git repo was initialized fresh; main branch created, then ralph/ksae-qna-vectordb branch
   - Each src module has a docstring describing its purpose
+---
+
+## 2026-02-11 - US-002
+- What was implemented: Board list page crawling - `crawl_list_pages()` function in src/crawler.py
+- Files changed: src/crawler.py
+- **Learnings for future iterations:**
+  - The board table has 7 columns; header rows are filtered by checking `td` count and numeric first cell
+  - The `number` param in detail page hrefs differs from the display post number (번호); both are stored (`id` and `number`)
+  - Pagination last page detection via `img[src*="block_next"]` parent anchor's `page` query param works reliably
+  - `_get_soup()` helper function is reusable for detail page crawling in US-003
+  - BeautifulSoup `Tag` type imports are needed for isinstance checks to satisfy pyright
+  - `href` attributes from BeautifulSoup can return `str | list[str]`; always handle the list case
 ---

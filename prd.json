@@ -34,7 +34,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Board URL: https://www.ksae.org/jajak/bbs/?code=J_qna - Table has columns: 번호, 구분, 제목, 등록자, 파일, 조회수, 등록일. Pagination has '마지막' link with page=N param. Currently 11 pages, ~150 posts."
     },
     {
