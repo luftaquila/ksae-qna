@@ -56,7 +56,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Detail page URL: https://www.ksae.org/jajak/bbs/?number={id}&mode=view&code=J_qna - Posts typically have single answer. Comments managed via JavaScript."
     },
     {

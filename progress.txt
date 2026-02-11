@@ -7,6 +7,11 @@
 - Post detail URL uses a `number` param (from the href) which differs from the display `번호` column
 - Direct Python requests to www.ksae.org may time out; WebFetch tool works as alternative for analysis
 - Use `from __future__ import annotations` for modern type hint syntax compatibility
+- www.ksae.org has weak DH keys; must use `@SECLEVEL=1` SSL cipher config via custom HTTPAdapter
+- Detail page table (`table.tblDef`): row 0 = title (class='bg'), row 1 = metadata (th/td pairs: 작성자, Date, Hits), row 2 = body (td class='con'), row 3+ = attachments (th class='th' with '첨부파일')
+- Answers on KSAE Q&A are separate posts (not inline); reply posts have `img.reply[src*="bl_reply"]` in title cell
+- Reply post body includes original question after `====== 원 글 ======` separator; split on this to extract answer only
+- Metadata row has alternating `<th>` and `<td>` tags; use `find_all("td")` to get only values (index 0=author, 1=date, 2=hits)
 
 ---
 
@@ -29,4 +34,18 @@
   - `_get_soup()` helper function is reusable for detail page crawling in US-003
   - BeautifulSoup `Tag` type imports are needed for isinstance checks to satisfy pyright
   - `href` attributes from BeautifulSoup can return `str | list[str]`; always handle the list case
+---
+
+## 2026-02-11 - US-003
+- What was implemented: Detail page crawling with `crawl_detail_page()` and `crawl_all_details()` orchestration in src/crawler.py
+- Files changed: src/crawler.py
+- **Learnings for future iterations:**
+  - www.ksae.org requires SSL `@SECLEVEL=1` workaround due to weak DH keys; added `_WeakDHAdapter` and module-level session
+  - Detail page uses `table.tblDef` with 3-4+ rows: title, metadata, body content, and optional attachment rows
+  - Metadata row has alternating th/td pairs; use `find_all("td")` to get only value cells (author, date, views)
+  - Answers are posted as separate reply posts (identified by `img[src*="bl_reply"]` in title cell)
+  - Reply posts include original question text after `====== 원 글 ======` separator
+  - Question-answer matching: reply posts appear immediately after their parent question in the list (sorted descending by id)
+  - Comments are JavaScript-based (forms with `cmF` name) but no rendered comments found on checked posts; comments list kept as empty array
+  - `_parse_list_row()` now includes `is_reply` field for downstream question-answer matching
 ---
