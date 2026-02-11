@@ -147,7 +147,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Incremental mode is the default to avoid unnecessary re-crawling. Full mode is for initial setup or reset."
     }
   ]

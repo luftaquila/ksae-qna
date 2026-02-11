@@ -54,8 +54,9 @@ def _run_stage(name: str, func: object, **kwargs: object) -> None:
 @click.option("--collection", default="ksae_qna", help="Qdrant collection name.")
 @click.option("--batch-size", default=32, type=int, help="Embedding batch size.")
 @click.option("--delay", default=1.5, type=float, help="Delay between requests (seconds).")
+@click.option("--mode", default="incremental", type=click.Choice(["full", "incremental"]), help="Crawl mode: full or incremental (default: incremental).")
 @click.pass_context
-def cli(ctx: click.Context, qdrant_url: str, collection: str, batch_size: int, delay: float) -> None:
+def cli(ctx: click.Context, qdrant_url: str, collection: str, batch_size: int, delay: float, mode: str) -> None:
     """KSAE Q&A VectorDB Pipeline.
 
     Run the full pipeline (crawl -> chunk -> embed -> upload) or individual stages.
@@ -65,33 +66,45 @@ def cli(ctx: click.Context, qdrant_url: str, collection: str, batch_size: int, d
     ctx.obj["collection"] = collection
     ctx.obj["batch_size"] = batch_size
     ctx.obj["delay"] = delay
+    ctx.obj["mode"] = mode
 
     if ctx.invoked_subcommand is None:
         # Run full pipeline
-        _run_full_pipeline(qdrant_url, collection, batch_size, delay)
+        _run_full_pipeline(qdrant_url, collection, batch_size, delay, mode)
 
 
-def _run_full_pipeline(qdrant_url: str, collection: str, batch_size: int, delay: float) -> None:
+def _run_full_pipeline(qdrant_url: str, collection: str, batch_size: int, delay: float, mode: str = "incremental") -> None:
     """Execute the full pipeline: crawl -> chunk -> embed -> upload."""
+    import json
+
     from src.chunker import chunk_posts
-    from src.crawler import crawl_all_details, crawl_list_pages
+    from src.crawler import crawl_all_details, crawl_list_pages, filter_new_posts, merge_posts
     from src.embedder import embed_chunks
     from src.uploader import upload_to_qdrant
 
     total_start = time.time()
-    click.echo("Running full pipeline: crawl -> chunk -> embed -> upload")
+    is_incremental = mode == "incremental"
+    click.echo(f"Running full pipeline ({mode} mode): crawl -> chunk -> embed -> upload")
 
     _run_stage("crawl-list", crawl_list_pages, delay=delay)
-    from src.crawler import crawl_list_pages as _crawl_list
 
-    import json
     with open("data/raw/post_list.json", "r", encoding="utf-8") as f:
-        post_list = json.load(f)
-    _run_stage("crawl-detail", crawl_all_details, post_list=post_list, delay=delay)
+        post_list: list[dict[str, object]] = json.load(f)
+
+    if is_incremental:
+        new_post_list = filter_new_posts(post_list)
+        if not new_post_list:
+            click.echo("No new posts found.")
+            return
+        click.echo(f"Found {len(new_post_list)} new posts to process")
+        _run_stage("crawl-detail", crawl_all_details, post_list=new_post_list, delay=delay)
+        _run_stage("merge", merge_posts)
+    else:
+        _run_stage("crawl-detail", crawl_all_details, post_list=post_list, delay=delay)
 
     _run_stage("chunk", chunk_posts)
     _run_stage("embed", embed_chunks, batch_size=batch_size)
-    _run_stage("upload", upload_to_qdrant, qdrant_url=qdrant_url, collection_name=collection)
+    _run_stage("upload", upload_to_qdrant, qdrant_url=qdrant_url, collection_name=collection, recreate=not is_incremental)
 
     total_elapsed = time.time() - total_start
     click.echo(f"Full pipeline completed in {total_elapsed:.1f}s")
@@ -104,15 +117,27 @@ def crawl(ctx: click.Context) -> None:
     """Run the crawl stage (list pages + detail pages)."""
     import json
 
-    from src.crawler import crawl_all_details, crawl_list_pages
+    from src.crawler import crawl_all_details, crawl_list_pages, filter_new_posts, merge_posts
 
     delay: float = ctx.obj["delay"]
+    mode: str = ctx.obj["mode"]
+    is_incremental = mode == "incremental"
 
     _run_stage("crawl-list", crawl_list_pages, delay=delay)
 
     with open("data/raw/post_list.json", "r", encoding="utf-8") as f:
-        post_list = json.load(f)
-    _run_stage("crawl-detail", crawl_all_details, post_list=post_list, delay=delay)
+        post_list: list[dict[str, object]] = json.load(f)
+
+    if is_incremental:
+        new_post_list = filter_new_posts(post_list)
+        if not new_post_list:
+            click.echo("No new posts found.")
+            return
+        click.echo(f"Found {len(new_post_list)} new posts to process")
+        _run_stage("crawl-detail", crawl_all_details, post_list=new_post_list, delay=delay)
+        _run_stage("merge", merge_posts)
+    else:
+        _run_stage("crawl-detail", crawl_all_details, post_list=post_list, delay=delay)
 
 
 @cli.command()

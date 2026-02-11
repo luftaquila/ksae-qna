@@ -21,7 +21,10 @@
 - Qdrant models: import `Distance`, `PayloadSchemaType`, `PointStruct`, `VectorParams` from `qdrant_client.models`
 - `upload_to_qdrant()` supports `recreate` flag for full vs incremental mode
 - CLI entry point: `main.py` with click group; `python main.py` runs full pipeline, `python main.py <stage>` runs individual stage
-- Global CLI options (--qdrant-url, --collection, --batch-size, --delay) are passed via `ctx.obj` dict
+- Global CLI options (--qdrant-url, --collection, --batch-size, --delay, --mode) are passed via `ctx.obj` dict
+- Incremental mode: `filter_new_posts()` compares board list IDs against existing `posts.json`; `merge_posts()` uses `.json.bak` backup for merging
+- `crawl_all_details()` creates a `.json.bak` backup of `posts.json` before overwriting, enabling incremental merge
+- Full mode passes `recreate=True` to `upload_to_qdrant()`; incremental mode uses `recreate=False` (append via upsert)
 
 ---
 
@@ -109,4 +112,16 @@
   - `_run_stage()` helper wraps each stage with timing, logging, and error handling; calls `sys.exit(1)` on failure to preserve intermediate results
   - The crawl stage requires two steps: list pages first, then reading post_list.json back to pass to detail crawling
   - All stage functions accept configurable paths/params, making them easy to wire into the CLI
+---
+
+## 2026-02-11 - US-008
+- What was implemented: Incremental crawling support with `--mode` CLI option (full/incremental)
+- Files changed: main.py, src/crawler.py, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - `filter_new_posts()` compares post IDs from the board list against existing `data/raw/posts.json`; new question posts and their reply posts are both included
+  - `crawl_all_details()` now creates a `.json.bak` backup before overwriting `posts.json`, enabling `merge_posts()` to combine old + new data
+  - `merge_posts()` reads the backup file and the newly written posts, deduplicates by post ID, and writes the merged result
+  - In incremental mode the full pipeline re-chunks and re-embeds all posts (merged), but appends to Qdrant without recreating the collection (upsert is idempotent due to deterministic UUIDs)
+  - In full mode, `recreate=True` is passed to `upload_to_qdrant()` to delete and recreate the collection
+  - Incremental mode is the default; full mode is opted into via `--mode full`
 ---

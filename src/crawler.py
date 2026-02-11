@@ -210,6 +210,101 @@ def crawl_list_pages(delay: float = DEFAULT_DELAY) -> list[dict[str, Any]]:
     return all_posts
 
 
+def filter_new_posts(post_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter post list to only include posts not already in data/raw/posts.json.
+
+    Compares post IDs from the crawled list against existing post IDs
+    from the saved posts file. Returns only new posts (including their
+    associated reply posts).
+
+    Args:
+        post_list: Full post list from ``crawl_list_pages()``.
+
+    Returns:
+        Filtered list of new post metadata dicts.
+    """
+    existing_path = Path("data/raw/posts.json")
+    if not existing_path.exists():
+        logger.info("No existing posts.json found, treating all posts as new")
+        return post_list
+
+    with open(existing_path, "r", encoding="utf-8") as f:
+        existing_posts: list[dict[str, Any]] = json.load(f)
+
+    existing_ids: set[int] = {p["id"] for p in existing_posts}
+    logger.info("Found %d existing post IDs", len(existing_ids))
+
+    # Filter to new question posts (non-reply posts not in existing IDs)
+    new_question_numbers: set[int] = set()
+    for meta in post_list:
+        if not meta["is_reply"] and meta["id"] not in existing_ids:
+            new_question_numbers.add(meta["number"])
+
+    if not new_question_numbers:
+        return []
+
+    # Also include reply posts that follow new questions
+    new_post_list: list[dict[str, Any]] = []
+    for i, meta in enumerate(post_list):
+        if meta["number"] in new_question_numbers:
+            new_post_list.append(meta)
+        elif meta["is_reply"] and i > 0:
+            prev = post_list[i - 1]
+            if prev["number"] in new_question_numbers:
+                new_post_list.append(meta)
+
+    logger.info("Filtered to %d new posts (including replies)", len(new_post_list))
+    return new_post_list
+
+
+def merge_posts(
+    new_posts_path: str | Path = "data/raw/posts.json",
+) -> None:
+    """Merge newly crawled posts into the existing posts file.
+
+    Reads the newly crawled posts (which ``crawl_all_details`` just wrote)
+    and merges them with any previously existing posts, avoiding duplicates
+    by post ID.
+
+    The merge creates a backup of the existing file before overwriting.
+
+    Args:
+        new_posts_path: Path to the posts file (used for both old and new data).
+    """
+    new_posts_path = Path(new_posts_path)
+
+    # The newly crawled posts were just written to posts.json by crawl_all_details.
+    # We need to merge them with the backup of the old data.
+    backup_path = new_posts_path.with_suffix(".json.bak")
+
+    if not backup_path.exists():
+        # No backup means there was no previous data; nothing to merge
+        logger.info("No backup file found, nothing to merge")
+        return
+
+    with open(backup_path, "r", encoding="utf-8") as f:
+        old_posts: list[dict[str, Any]] = json.load(f)
+
+    with open(new_posts_path, "r", encoding="utf-8") as f:
+        new_posts: list[dict[str, Any]] = json.load(f)
+
+    # Merge: old posts + new posts, deduplicated by id
+    existing_ids: set[int] = {p["id"] for p in old_posts}
+    merged = list(old_posts)
+    added = 0
+    for post in new_posts:
+        if post["id"] not in existing_ids:
+            merged.append(post)
+            existing_ids.add(post["id"])
+            added += 1
+
+    with open(new_posts_path, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2)
+
+    logger.info("Merged %d new posts into %d existing (total: %d)", added, len(old_posts), len(merged))
+    print(f"Merged {added} new posts into {len(old_posts)} existing (total: {len(merged)})")
+
+
 def _clean_text(text: str) -> str:
     """Strip HTML artifacts and normalize whitespace in extracted text."""
     # Normalize whitespace: collapse multiple spaces/tabs but keep newlines
@@ -416,6 +511,14 @@ def crawl_all_details(
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     posts_path = raw_dir / "posts.json"
+
+    # Backup existing posts.json before overwriting (for incremental merge)
+    if posts_path.exists():
+        import shutil
+        backup_path = posts_path.with_suffix(".json.bak")
+        shutil.copy2(posts_path, backup_path)
+        logger.info("Backed up existing posts to %s", backup_path)
+
     with open(posts_path, "w", encoding="utf-8") as f:
         json.dump(posts, f, ensure_ascii=False, indent=2)
     logger.info("Saved %d posts to %s", len(posts), posts_path)
