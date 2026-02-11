@@ -88,7 +88,7 @@
 **Acceptance Criteria:**
 - [ ] Qdrant 컬렉션 `ksae_qna` 생성 (존재하면 스킵 또는 recreate 옵션)
 - [ ] 벡터 설정: 1024차원, Cosine distance
-- [ ] 각 포인트에 payload로 메타데이터 저장: `id`, `category`, `title`, `author`, `date`, `url`, `chunk_text`, `chunk_index`
+- [ ] 각 포인트에 payload로 메타데이터 저장: `id`, `category`, `title`, `author`, `date`, `url`, `content`, `chunk_index`
 - [ ] 배치 업로드 (배치 사이즈 100)
 - [ ] 업로드 완료 후 컬렉션 정보 출력 (총 포인트 수, 벡터 차원)
 - [ ] `category` 필드에 keyword 인덱스 생성 (필터링용)

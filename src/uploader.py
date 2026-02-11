@@ -126,7 +126,7 @@ def upload_to_qdrant(
                     "author": chunk.get("author", ""),
                     "date": chunk["date"],
                     "url": chunk["url"],
-                    "chunk_text": chunk["text"],
+                    "content": chunk["text"],
                     "chunk_index": chunk["chunk_index"],
                 },
             )

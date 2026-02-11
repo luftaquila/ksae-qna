@@ -105,7 +105,7 @@
         "Connect to Qdrant at configurable URL (default http://localhost:6333)",
         "Create collection 'ksae_qna' with vectors config: size=1024, distance=Cosine",
         "If collection already exists, provide recreate option (default: skip creation)",
-        "Upload points in batches of 100 with payload: id, category, title, author, date, url, chunk_text, chunk_index",
+        "Upload points in batches of 100 with payload: id, category, title, author, date, url, content, chunk_index",
         "Create keyword payload index on 'category' field for filtered search",
         "Print collection info after upload: total points count, vector dimensions",
         "Typecheck passes"
