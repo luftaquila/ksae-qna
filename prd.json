@@ -74,7 +74,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Most Q&A posts are short enough to fit in one chunk. Token counting should use a simple tokenizer (e.g. split on whitespace or use tiktoken) for rough estimation."
     },
     {

@@ -12,6 +12,8 @@
 - Answers on KSAE Q&A are separate posts (not inline); reply posts have `img.reply[src*="bl_reply"]` in title cell
 - Reply post body includes original question after `====== 원 글 ======` separator; split on this to extract answer only
 - Metadata row has alternating `<th>` and `<td>` tags; use `find_all("td")` to get only values (index 0=author, 1=date, 2=hits)
+- Chunk schema: `{post_id, category, title, date, url, chunk_index, text}` — saved to `data/processed/chunks.json`
+- Token counting uses simple whitespace split (`str.split()`) for rough estimation
 
 ---
 
@@ -48,4 +50,17 @@
   - Question-answer matching: reply posts appear immediately after their parent question in the list (sorted descending by id)
   - Comments are JavaScript-based (forms with `cmF` name) but no rendered comments found on checked posts; comments list kept as empty array
   - `_parse_list_row()` now includes `is_reply` field for downstream question-answer matching
+---
+
+## 2026-02-11 - US-004
+- What was implemented: Text chunking module `chunk_posts()` in src/chunker.py
+- Files changed: src/chunker.py
+- **Learnings for future iterations:**
+  - Simple whitespace tokenizer (`str.split()`) used for rough token counting per PRD notes
+  - Most Q&A posts are short and fit in a single chunk (≤512 tokens)
+  - For long posts: split by paragraphs first, then sentences if paragraph is still too long
+  - Overlap is applied at the token level (last 50 tokens of previous chunk prepended to next)
+  - Chunk metadata schema: post_id, category, title, date, url, chunk_index, text
+  - `chunk_posts()` accepts configurable input/output paths for reuse in incremental mode (US-008)
+  - Statistics (total chunks, avg/min/max token length) are both logged and printed to stdout
 ---
