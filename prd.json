@@ -1,0 +1,154 @@
+{
+  "project": "KSAE Q&A VectorDB Pipeline",
+  "branchName": "ralph/ksae-qna-vectordb",
+  "description": "KSAE Q&A 게시판의 전체 게시글/답변을 크롤링하여 BGE-M3로 임베딩 후 Qdrant에 업로드하는 RAG 데이터 파이프라인",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "프로젝트 구조 및 의존성 설정",
+      "description": "As a developer, I need the project directory structure and dependencies set up so that subsequent stories have a working foundation.",
+      "acceptanceCriteria": [
+        "Create directory structure: src/, data/raw/, data/processed/",
+        "Create requirements.txt with: requests, beautifulsoup4, lxml, FlagEmbedding, numpy, qdrant-client, tqdm, click",
+        "Create empty __init__.py in src/",
+        "Create placeholder modules: src/crawler.py, src/chunker.py, src/embedder.py, src/uploader.py",
+        "Each placeholder module has a docstring describing its purpose",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "게시판 목록 페이지 크롤링",
+      "description": "As a developer, I need to crawl all list pages of the KSAE Q&A board to collect post metadata (id, category, title, author, views, date, detail URL).",
+      "acceptanceCriteria": [
+        "Implement crawl_list_pages() in src/crawler.py that returns list of post metadata dicts",
+        "Automatically detect last page number by parsing the '마지막' button's page parameter from the pagination HTML",
+        "Iterate from page 1 to last page using URL pattern: https://www.ksae.org/jajak/bbs/?code=J_qna&page={n}",
+        "Extract from each row: post number (int), category string, title, author, view count (int), date (YYYY-MM-DD)",
+        "Generate detail URL for each post: /jajak/bbs/?number={id}&mode=view&code=J_qna",
+        "Apply configurable delay between requests (default 1.5s) to avoid server overload",
+        "Save intermediate metadata list to data/raw/post_list.json",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Board URL: https://www.ksae.org/jajak/bbs/?code=J_qna - Table has columns: 번호, 구분, 제목, 등록자, 파일, 조회수, 등록일. Pagination has '마지막' link with page=N param. Currently 11 pages, ~150 posts."
+    },
+    {
+      "id": "US-003",
+      "title": "게시글 상세 페이지 크롤링 및 데이터 저장",
+      "description": "As a developer, I need to crawl each post's detail page to extract question body, answer body, and comments, then save all data as structured JSON.",
+      "acceptanceCriteria": [
+        "Implement crawl_detail_page(post_id) in src/crawler.py that returns full post data dict",
+        "Extract question title and question body text from detail page",
+        "Extract answer body text if answer exists (답변 section)",
+        "Extract comments list if comments exist",
+        "Record attachment URLs in metadata (do not download files)",
+        "Strip HTML tags and normalize whitespace/newlines to clean plain text",
+        "Implement retry logic: max 3 attempts per page with exponential backoff",
+        "Log failed post IDs to a failures list",
+        "Apply configurable delay between requests (default 1.5s)",
+        "Save all posts to data/raw/posts.json with schema: {id, category, title, author, date, views, question_body, answer_body, comments[], attachments[], url}",
+        "Save crawl metadata to data/raw/crawl_meta.json: {crawled_at, total_count, failed_count, failed_ids[]}",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Detail page URL: https://www.ksae.org/jajak/bbs/?number={id}&mode=view&code=J_qna - Posts typically have single answer. Comments managed via JavaScript."
+    },
+    {
+      "id": "US-004",
+      "title": "텍스트 청킹",
+      "description": "As a developer, I need to chunk the crawled Q&A data into RAG-optimized segments so that retrieval quality is maximized.",
+      "acceptanceCriteria": [
+        "Implement chunk_posts() in src/chunker.py that reads data/raw/posts.json and outputs chunks",
+        "Primary unit: combine question title + question body + answer body into one document per post",
+        "If combined text is 512 tokens or fewer, keep as single chunk",
+        "If combined text exceeds 512 tokens, split by paragraph/sentence boundaries with 50-token overlap between chunks",
+        "Each chunk dict preserves metadata: post_id, category, title, date, url, chunk_index",
+        "Save chunks to data/processed/chunks.json as JSON array",
+        "Print chunking statistics: total chunks, avg/min/max chunk token length",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Most Q&A posts are short enough to fit in one chunk. Token counting should use a simple tokenizer (e.g. split on whitespace or use tiktoken) for rough estimation."
+    },
+    {
+      "id": "US-005",
+      "title": "BGE-M3 임베딩 생성",
+      "description": "As a developer, I need to embed all text chunks using the BGE-M3 model to produce dense vectors for vector search.",
+      "acceptanceCriteria": [
+        "Implement embed_chunks() in src/embedder.py that reads data/processed/chunks.json",
+        "Load BAAI/bge-m3 model using FlagEmbedding library (BGEM3FlagModel)",
+        "Generate dense embedding vectors (1024 dimensions) for each chunk's text",
+        "Process in batches of configurable size (default 32)",
+        "Automatically use GPU if available (CUDA/MPS), fall back to CPU",
+        "Show progress bar using tqdm",
+        "Save embeddings to data/processed/embeddings.npy as numpy array with shape (num_chunks, 1024)",
+        "Verify embeddings.npy row count matches chunks.json length",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "BGE-M3 supports max_length=8192 tokens. Dense output dimension is 1024. FlagEmbedding: from FlagEmbedding import BGEM3FlagModel"
+    },
+    {
+      "id": "US-006",
+      "title": "Qdrant 벡터 업로드",
+      "description": "As a developer, I need to upload embedding vectors and metadata to Qdrant so that vector similarity search is available for the RAG chatbot.",
+      "acceptanceCriteria": [
+        "Implement upload_to_qdrant() in src/uploader.py that reads chunks.json and embeddings.npy",
+        "Connect to Qdrant at configurable URL (default http://localhost:6333)",
+        "Create collection 'ksae_qna' with vectors config: size=1024, distance=Cosine",
+        "If collection already exists, provide recreate option (default: skip creation)",
+        "Upload points in batches of 100 with payload: id, category, title, author, date, url, chunk_text, chunk_index",
+        "Create keyword payload index on 'category' field for filtered search",
+        "Print collection info after upload: total points count, vector dimensions",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Use qdrant_client.QdrantClient. Categories for filtering: Baja, Formula, EV, 기술, 기타."
+    },
+    {
+      "id": "US-007",
+      "title": "CLI 파이프라인 통합",
+      "description": "As a developer, I need a single CLI entry point that runs the full pipeline (crawl -> chunk -> embed -> upload) and supports running individual stages.",
+      "acceptanceCriteria": [
+        "Create main.py with click CLI group",
+        "Default command runs full pipeline: crawl -> chunk -> embed -> upload sequentially",
+        "Subcommands available: 'crawl', 'chunk', 'embed', 'upload' for running individual stages",
+        "Global CLI options: --qdrant-url (default http://localhost:6333), --collection (default ksae_qna), --batch-size (default 32), --delay (default 1.5)",
+        "Log start/completion/elapsed time for each pipeline stage",
+        "If a stage fails, preserve intermediate results and exit with informative error message",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Use click library for CLI. Each stage reads from the previous stage's output files, so re-running from a specific stage is naturally supported."
+    },
+    {
+      "id": "US-008",
+      "title": "증분 크롤링 지원",
+      "description": "As a developer, I need incremental crawling mode so that only new posts are processed without re-crawling the entire board.",
+      "acceptanceCriteria": [
+        "Add --mode option to CLI: 'full' or 'incremental' (default: incremental)",
+        "In incremental mode, load existing post IDs from data/raw/posts.json if it exists",
+        "Compare board list page IDs against existing IDs, filter to only new post IDs",
+        "If no new posts found, print 'No new posts found' and exit gracefully",
+        "Crawl only new posts' detail pages",
+        "Run new posts through chunk -> embed -> upload pipeline (append to Qdrant, don't recreate collection)",
+        "Merge new post data into existing data/raw/posts.json",
+        "In full mode, process all posts from scratch (recreate collection if exists)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Incremental mode is the default to avoid unnecessary re-crawling. Full mode is for initial setup or reset."
+    }
+  ]
+}
