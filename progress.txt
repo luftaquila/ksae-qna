@@ -14,6 +14,9 @@
 - Metadata row has alternating `<th>` and `<td>` tags; use `find_all("td")` to get only values (index 0=author, 1=date, 2=hits)
 - Chunk schema: `{post_id, category, title, date, url, chunk_index, text}` — saved to `data/processed/chunks.json`
 - Token counting uses simple whitespace split (`str.split()`) for rough estimation
+- FlagEmbedding has no type stubs; use `# type: ignore[import-untyped]` for pyright
+- BGE-M3 model: `BGEM3FlagModel("BAAI/bge-m3", use_fp16=True)` — auto-detects GPU (CUDA/MPS/CPU)
+- `model.encode()` returns dict with `dense_vecs` key containing numpy array of shape (batch, 1024)
 
 ---
 
@@ -63,4 +66,16 @@
   - Chunk metadata schema: post_id, category, title, date, url, chunk_index, text
   - `chunk_posts()` accepts configurable input/output paths for reuse in incremental mode (US-008)
   - Statistics (total chunks, avg/min/max token length) are both logged and printed to stdout
+---
+
+## 2026-02-11 - US-005
+- What was implemented: BGE-M3 embedding generation module `embed_chunks()` in src/embedder.py
+- Files changed: src/embedder.py
+- **Learnings for future iterations:**
+  - FlagEmbedding package has no type stubs; requires `# type: ignore[import-untyped]` for pyright
+  - `BGEM3FlagModel("BAAI/bge-m3", use_fp16=True)` auto-detects GPU availability (CUDA > MPS > CPU)
+  - `model.encode()` returns a dict; dense embeddings are under `output["dense_vecs"]` key
+  - Dense embedding dimension is 1024; max_length supported is 8192 tokens
+  - `embed_chunks()` accepts configurable input/output paths and batch_size for reuse in incremental mode (US-008)
+  - Embeddings saved as numpy .npy file; row count verified against chunks.json length with assert
 ---

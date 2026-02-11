@@ -93,7 +93,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "BGE-M3 supports max_length=8192 tokens. Dense output dimension is 1024. FlagEmbedding: from FlagEmbedding import BGEM3FlagModel"
     },
     {
