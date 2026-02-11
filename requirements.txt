@@ -1,7 +1,7 @@
 requests
 beautifulsoup4
 lxml
-FlagEmbedding
+sentence-transformers
 numpy
 qdrant-client
 tqdm

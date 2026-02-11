@@ -21,24 +21,20 @@ DEFAULT_BATCH_SIZE = 32
 
 
 def _embed_local(texts: list[str], batch_size: int) -> np.ndarray[Any, np.dtype[np.float32]]:
-    """Embed texts using the local FlagEmbedding model."""
-    from FlagEmbedding import BGEM3FlagModel  # type: ignore[import-untyped]
+    """Embed texts using the local SentenceTransformer model."""
+    from sentence_transformers import SentenceTransformer
 
     print("Loading BGE-M3 model...")
     logger.info("Loading BGE-M3 model...")
-    model = BGEM3FlagModel("BAAI/bge-m3", use_fp16=True)
+    model = SentenceTransformer("BAAI/bge-m3")
     print("Model loaded.")
     logger.info("Model loaded.")
 
     all_embeddings: list[np.ndarray[Any, np.dtype[np.float32]]] = []
     for i in tqdm(range(0, len(texts), batch_size), desc="Embedding"):
         batch_texts = texts[i : i + batch_size]
-        output = model.encode(
-            batch_texts,
-            batch_size=len(batch_texts),
-            max_length=8192,
-        )
-        all_embeddings.append(output["dense_vecs"])
+        output = model.encode(batch_texts, batch_size=len(batch_texts))
+        all_embeddings.append(output)
 
     return np.vstack(all_embeddings).astype(np.float32)
 
