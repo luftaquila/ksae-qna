@@ -25,6 +25,7 @@ from src.auth import (
     get_messages,
     get_or_create_user,
     get_session,
+    get_transactions,
     init_db,
     init_oauth,
     list_sessions,
@@ -135,6 +136,14 @@ async def topup(request: Request, body: TopupRequest):
         return JSONResponse({"error": "충전량은 1~1000 사이여야 합니다"}, status_code=400)
 
     return {"credits": new_balance}
+
+
+@app.get("/api/transactions")
+async def transactions(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    return {"transactions": get_transactions(user["id"])}
 
 
 # ---------------------------------------------------------------------------

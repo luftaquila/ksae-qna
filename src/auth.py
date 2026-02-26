@@ -89,6 +89,18 @@ def init_db() -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS token_transactions (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL REFERENCES users(id),
+            amount     INTEGER NOT NULL,
+            type       TEXT    NOT NULL,
+            memo       TEXT,
+            created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -142,6 +154,11 @@ def deduct_credit(user_id: int) -> bool:
         "UPDATE users SET credits = credits - 1, updated_at = datetime('now') WHERE id = ? AND credits > 0",
         (user_id,),
     )
+    if cur.rowcount > 0:
+        conn.execute(
+            "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
+            (user_id, -1, "usage", "질문"),
+        )
     conn.commit()
     success = cur.rowcount > 0
     conn.close()
@@ -157,10 +174,25 @@ def add_credits(user_id: int, amount: int) -> int | None:
         "UPDATE users SET credits = credits + ?, updated_at = datetime('now') WHERE id = ?",
         (amount, user_id),
     )
+    conn.execute(
+        "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
+        (user_id, amount, "purchase", "토큰 구매"),
+    )
     conn.commit()
     row = conn.execute("SELECT credits FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.close()
     return row["credits"] if row else None
+
+
+def get_transactions(user_id: int, limit: int = 30) -> list[dict]:
+    """Return recent token transactions for a user."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT amount, type, memo, created_at FROM token_transactions WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------

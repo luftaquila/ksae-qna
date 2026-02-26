@@ -4,10 +4,9 @@ const queryInput = document.getElementById("query");
 const sendBtn = document.getElementById("send");
 const authArea = document.getElementById("auth-area");
 const loginOverlay = document.getElementById("login-overlay");
-const sidebar = document.getElementById("sidebar");
 const sessionListEl = document.getElementById("session-list");
 const newChatBtn = document.getElementById("new-chat-btn");
-const sidebarToggle = document.getElementById("sidebar-toggle");
+const themeToggle = document.getElementById("theme-toggle");
 
 let currentUser = null;
 let currentSessionId = null;
@@ -46,13 +45,14 @@ function renderAuthUI() {
         ${img}
         <span class="profile-name">${escapeHtml(currentUser.name)}</span>
       </div>
-      <span class="credit-badge${lowClass}" id="credit-badge">${currentUser.credits} 크레딧</span>
-      <button class="topup-btn" id="topup-btn">충전</button>
+      <div class="token-wrapper">
+        <span class="credit-badge${lowClass}" id="credit-badge">${currentUser.credits} 토큰</span>
+      </div>
       <button class="logout-btn" id="logout-btn">로그아웃</button>
     `;
 
     document.getElementById("logout-btn").addEventListener("click", handleLogout);
-    document.getElementById("topup-btn").addEventListener("click", showTopupModal);
+    document.getElementById("credit-badge").addEventListener("click", toggleTokenPopover);
   } else {
     loginOverlay.classList.remove("hidden");
     queryInput.disabled = true;
@@ -66,7 +66,7 @@ function updateCreditDisplay(credits) {
   if (currentUser) currentUser.credits = credits;
   const badge = document.getElementById("credit-badge");
   if (!badge) return;
-  badge.textContent = `${credits} 크레딧`;
+  badge.textContent = `${credits} 토큰`;
   badge.classList.toggle("low", credits <= 5);
 }
 
@@ -81,49 +81,119 @@ async function handleLogout() {
 }
 
 // ---------------------------------------------------------------------------
-// Topup modal
+// Token popover
 // ---------------------------------------------------------------------------
-function showTopupModal() {
-  const modal = document.createElement("div");
-  modal.className = "topup-modal";
-  modal.innerHTML = `
-    <div class="topup-box">
-      <h3>크레딧 충전</h3>
-      <input type="number" id="topup-amount" min="1" max="1000" value="30" placeholder="충전량 (1~1000)">
-      <div class="topup-actions">
-        <button class="topup-cancel" id="topup-cancel">취소</button>
-        <button class="topup-confirm" id="topup-confirm">충전</button>
+let tokenPopover = null;
+
+function toggleTokenPopover() {
+  if (tokenPopover) {
+    closeTokenPopover();
+    return;
+  }
+
+  const wrapper = document.querySelector(".token-wrapper");
+  tokenPopover = document.createElement("div");
+  tokenPopover.className = "token-popover";
+  tokenPopover.innerHTML = `
+    <div class="token-popover-header">
+      <span>토큰 내역</span>
+    </div>
+    <div class="token-history"><div class="token-history-loading">불러오는 중...</div></div>
+    <div class="token-popover-footer">
+      <div class="token-purchase-row">
+        <input type="number" class="token-purchase-input" min="1" max="1000" value="30" placeholder="수량">
+        <button class="token-purchase-btn">구매</button>
       </div>
     </div>
   `;
-  document.body.appendChild(modal);
+  wrapper.appendChild(tokenPopover);
 
-  modal.querySelector("#topup-cancel").addEventListener("click", () => modal.remove());
-  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+  loadTransactions();
 
-  modal.querySelector("#topup-confirm").addEventListener("click", async () => {
-    const amount = parseInt(modal.querySelector("#topup-amount").value, 10);
-    if (!amount || amount < 1 || amount > 1000) return;
-
-    try {
-      const res = await fetch("/api/credits/topup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        updateCreditDisplay(data.credits);
-        modal.remove();
-      } else {
-        alert(data.error || "충전에 실패했습니다");
-      }
-    } catch {
-      alert("충전에 실패했습니다");
-    }
+  tokenPopover.querySelector(".token-purchase-btn").addEventListener("click", handleTokenPurchase);
+  tokenPopover.querySelector(".token-purchase-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") handleTokenPurchase();
   });
 
-  modal.querySelector("#topup-amount").focus();
+  setTimeout(() => document.addEventListener("click", onClickOutsidePopover), 0);
+}
+
+function closeTokenPopover() {
+  if (tokenPopover) {
+    tokenPopover.remove();
+    tokenPopover = null;
+  }
+  document.removeEventListener("click", onClickOutsidePopover);
+}
+
+function onClickOutsidePopover(e) {
+  if (tokenPopover && !tokenPopover.contains(e.target) && e.target.id !== "credit-badge") {
+    closeTokenPopover();
+  }
+}
+
+async function loadTransactions() {
+  const historyEl = tokenPopover?.querySelector(".token-history");
+  if (!historyEl) return;
+
+  try {
+    const res = await fetch("/api/transactions");
+    const data = await res.json();
+    const txns = data.transactions || [];
+
+    if (!txns.length) {
+      historyEl.innerHTML = `<div class="token-history-empty">내역이 없습니다</div>`;
+      return;
+    }
+
+    historyEl.innerHTML = txns.map((t) => {
+      const isUsage = t.amount < 0;
+      const sign = isUsage ? "" : "+";
+      const cls = isUsage ? "usage" : "purchase";
+      const date = t.created_at.slice(0, 16).replace("T", " ");
+      return `<div class="token-tx ${cls}">
+        <div class="token-tx-info">
+          <span class="token-tx-memo">${escapeHtml(t.memo || t.type)}</span>
+          <span class="token-tx-date">${date}</span>
+        </div>
+        <span class="token-tx-amount">${sign}${t.amount}</span>
+      </div>`;
+    }).join("");
+  } catch {
+    historyEl.innerHTML = `<div class="token-history-empty">불러오기 실패</div>`;
+  }
+}
+
+async function handleTokenPurchase() {
+  const input = tokenPopover?.querySelector(".token-purchase-input");
+  if (!input) return;
+  const amount = parseInt(input.value, 10);
+  if (!amount || amount < 1 || amount > 1000) return;
+
+  const btn = tokenPopover.querySelector(".token-purchase-btn");
+  btn.disabled = true;
+  btn.textContent = "...";
+
+  try {
+    const res = await fetch("/api/credits/topup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      updateCreditDisplay(data.credits);
+      loadTransactions();
+      input.value = "30";
+    } else {
+      alert(data.error || "구매에 실패했습니다");
+    }
+  } catch {
+    alert("구매에 실패했습니다");
+  }
+
+  btn.disabled = false;
+  btn.textContent = "구매";
 }
 
 // ---------------------------------------------------------------------------
@@ -149,7 +219,7 @@ function renderSessionList() {
       <span class="session-item-title">${escapeHtml(s.title)}</span>
       <button class="session-item-delete" title="삭제">&#10005;</button>
     `;
-    item.querySelector(".session-item-title").addEventListener("click", () => switchSession(s.id));
+    item.addEventListener("click", () => switchSession(s.id));
     item.querySelector(".session-item-delete").addEventListener("click", (e) => {
       e.stopPropagation();
       deleteSession(s.id);
@@ -190,8 +260,6 @@ async function switchSession(id) {
     chat.innerHTML = "";
   }
 
-  // Close sidebar on mobile
-  closeSidebar();
 }
 
 function startNewChat() {
@@ -199,10 +267,10 @@ function startNewChat() {
   renderSessionList();
   chat.innerHTML = "";
   queryInput.focus();
-  closeSidebar();
 }
 
 async function deleteSession(id) {
+  if (!confirm("이 대화를 삭제하시겠습니까?")) return;
   try {
     await fetch(`/api/sessions/${id}`, { method: "DELETE" });
     sessions = sessions.filter((s) => s.id !== id);
@@ -214,39 +282,36 @@ async function deleteSession(id) {
   } catch {}
 }
 
-// ---------------------------------------------------------------------------
-// Sidebar toggle (mobile)
-// ---------------------------------------------------------------------------
-let sidebarOverlay = null;
+newChatBtn.addEventListener("click", startNewChat);
 
-function openSidebar() {
-  sidebar.classList.add("open");
-  if (!sidebarOverlay) {
-    sidebarOverlay = document.createElement("div");
-    sidebarOverlay.className = "sidebar-overlay active";
-    sidebarOverlay.addEventListener("click", closeSidebar);
-    document.body.appendChild(sidebarOverlay);
-  } else {
-    sidebarOverlay.classList.add("active");
-  }
+// ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
+function initTheme() {
+  const saved = localStorage.getItem("theme");
+  const theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", theme);
+  themeToggle.textContent = theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
 }
 
-function closeSidebar() {
-  sidebar.classList.remove("open");
-  if (sidebarOverlay) {
-    sidebarOverlay.classList.remove("active");
-  }
+function setTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("theme", theme);
+  themeToggle.textContent = theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
 }
 
-sidebarToggle.addEventListener("click", () => {
-  if (sidebar.classList.contains("open")) {
-    closeSidebar();
-  } else {
-    openSidebar();
-  }
+themeToggle.addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme");
+  setTheme(current === "dark" ? "light" : "dark");
 });
 
-newChatBtn.addEventListener("click", startNewChat);
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+  if (!localStorage.getItem("theme")) {
+    const theme = e.matches ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", theme);
+    themeToggle.textContent = theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Chat
@@ -283,7 +348,7 @@ form.addEventListener("submit", async (e) => {
     }
 
     if (res.status === 402) {
-      answerEl.textContent = "크레딧이 부족합니다. 충전 후 다시 시도해주세요.";
+      answerEl.textContent = "토큰이 부족합니다. 구매 후 다시 시도해주세요.";
       updateCreditDisplay(0);
       setLoading(false);
       return;
@@ -436,4 +501,5 @@ function escapeAttr(str) {
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
+initTheme();
 checkAuth();
