@@ -45,6 +45,7 @@ def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
@@ -62,6 +63,29 @@ def init_db() -> None:
             credits     INTEGER NOT NULL DEFAULT 30,
             created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
             updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL REFERENCES users(id),
+            title      TEXT    NOT NULL DEFAULT '새 대화',
+            created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS messages (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            role       TEXT    NOT NULL,
+            content    TEXT    NOT NULL,
+            sources    TEXT,
+            created_at TEXT    NOT NULL DEFAULT (datetime('now'))
         )
         """
     )
@@ -188,3 +212,82 @@ def get_current_user(request: Request) -> dict | None:
     if not payload:
         return None
     return get_user_by_id(int(payload["sub"]))
+
+
+# ---------------------------------------------------------------------------
+# Session / Message CRUD
+# ---------------------------------------------------------------------------
+def create_session(user_id: int, title: str = "새 대화") -> dict:
+    conn = _get_conn()
+    cur = conn.execute(
+        "INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title)
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM sessions WHERE id = ?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def list_sessions(user_id: int) -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC", (user_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_session(session_id: int, user_id: int) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_session(session_id: int, user_id: int) -> bool:
+    conn = _get_conn()
+    cur = conn.execute(
+        "DELETE FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id)
+    )
+    conn.commit()
+    deleted = cur.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def update_session_title(session_id: int, user_id: int, title: str) -> bool:
+    conn = _get_conn()
+    cur = conn.execute(
+        "UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+        (title, session_id, user_id),
+    )
+    conn.commit()
+    updated = cur.rowcount > 0
+    conn.close()
+    return updated
+
+
+def add_message(session_id: int, role: str, content: str, sources: str | None = None) -> dict:
+    conn = _get_conn()
+    cur = conn.execute(
+        "INSERT INTO messages (session_id, role, content, sources) VALUES (?, ?, ?, ?)",
+        (session_id, role, content, sources),
+    )
+    conn.execute(
+        "UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", (session_id,)
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM messages WHERE id = ?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def get_messages(session_id: int) -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC", (session_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

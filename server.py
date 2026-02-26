@@ -2,6 +2,7 @@
 FastAPI server for KSAE Q&A chatbot.
 """
 
+import json
 import os
 from contextlib import asynccontextmanager
 
@@ -14,15 +15,22 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from src.auth import (
     add_credits,
+    add_message,
     clear_auth_cookie,
     create_jwt,
+    create_session,
     deduct_credit,
+    delete_session,
     get_current_user,
+    get_messages,
     get_or_create_user,
+    get_session,
     init_db,
     init_oauth,
+    list_sessions,
     oauth,
     set_auth_cookie,
+    update_session_title,
 )
 from src.chat import init_resources, search_and_stream
 
@@ -44,6 +52,11 @@ app.add_middleware(SessionMiddleware, secret_key=os.environ.get("JWT_SECRET", "d
 class ChatRequest(BaseModel):
     query: str
     limit: int = 5
+    session_id: int | None = None
+
+
+class SessionPatch(BaseModel):
+    title: str
 
 
 class TopupRequest(BaseModel):
@@ -125,7 +138,58 @@ async def topup(request: Request, body: TopupRequest):
 
 
 # ---------------------------------------------------------------------------
-# Chat (with auth + credit check)
+# Session routes
+# ---------------------------------------------------------------------------
+@app.get("/api/sessions")
+async def sessions_list(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    return {"sessions": list_sessions(user["id"])}
+
+
+@app.post("/api/sessions")
+async def sessions_create(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    session = create_session(user["id"])
+    return {"session": session}
+
+
+@app.get("/api/sessions/{session_id}/messages")
+async def sessions_messages(session_id: int, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    session = get_session(session_id, user["id"])
+    if not session:
+        return JSONResponse({"error": "세션을 찾을 수 없습니다"}, status_code=404)
+    return {"messages": get_messages(session_id)}
+
+
+@app.delete("/api/sessions/{session_id}")
+async def sessions_delete(session_id: int, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    if not delete_session(session_id, user["id"]):
+        return JSONResponse({"error": "세션을 찾을 수 없습니다"}, status_code=404)
+    return {"ok": True}
+
+
+@app.patch("/api/sessions/{session_id}")
+async def sessions_update(session_id: int, body: SessionPatch, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    if not update_session_title(session_id, user["id"], body.title):
+        return JSONResponse({"error": "세션을 찾을 수 없습니다"}, status_code=404)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Chat (with auth + credit check + session persistence)
 # ---------------------------------------------------------------------------
 @app.post("/api/chat")
 async def chat(request: Request, req: ChatRequest):
@@ -138,8 +202,62 @@ async def chat(request: Request, req: ChatRequest):
 
     remaining = user["credits"] - 1
 
+    # Resolve or create session
+    session_id = req.session_id
+    if session_id:
+        session = get_session(session_id, user["id"])
+        if not session:
+            return JSONResponse({"error": "세션을 찾을 수 없습니다"}, status_code=404)
+    else:
+        title = req.query[:50]
+        session = create_session(user["id"], title)
+        session_id = session["id"]
+
+    # Fetch recent history (last 3 turns = 6 messages) before persisting current user message
+    history = []
+    if req.session_id:
+        prev_messages = get_messages(session_id)
+        # Take last 6 messages (3 user + 3 assistant turns)
+        for msg in prev_messages[-6:]:
+            history.append({"role": msg["role"], "content": msg["content"]})
+
+    # Persist user message
+    add_message(session_id, "user", req.query)
+
+    # If this is the first message in an existing session with default title, update it
+    if req.session_id and session["title"] == "새 대화":
+        update_session_title(session_id, user["id"], req.query[:50])
+
+    async def stream_and_persist():
+        full_text = ""
+        sources_json = None
+
+        async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history):
+            yield event
+
+            # Collect data for persistence
+            for line in event.strip().split("\n"):
+                if line.startswith("event: sources"):
+                    pass  # next data line has the sources
+                elif line.startswith("data: ") and sources_json is None and "sources" in event:
+                    try:
+                        sources_json = line[6:]
+                    except Exception:
+                        pass
+                elif line.startswith("data: ") and "token" in event:
+                    try:
+                        full_text += json.loads(line[6:])
+                    except Exception:
+                        pass
+
+        # Persist assistant message
+        add_message(session_id, "assistant", full_text, sources_json)
+
+        # Send session_id to client
+        yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
+
     return StreamingResponse(
-        search_and_stream(req.query, req.limit),
+        stream_and_persist(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

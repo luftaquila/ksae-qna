@@ -57,7 +57,7 @@ def init_resources():
     print("Gemini client initialized.")
 
 
-def search(query: str, limit: int = 5) -> list[dict]:
+def search(query: str, limit: int = 5, min_score: float = 0.0) -> list[dict]:
     """Encode query with BGE-M3 and search Qdrant for similar chunks."""
     vector = _model.encode(query).tolist()
     results = _qdrant.query_points(
@@ -68,6 +68,9 @@ def search(query: str, limit: int = 5) -> list[dict]:
 
     output = []
     for hit in results.points:
+        if hit.score < min_score:
+            continue
+
         payload = hit.payload or {}
         content = payload.get("content", "") or payload.get("chunk_text", "")
 
@@ -103,26 +106,39 @@ def _build_prompt(query: str, sources: list[dict]) -> str:
     return f"다음은 검색된 참고 문서입니다:\n\n{context}\n\n---\n\n사용자 질문: {query}"
 
 
-async def search_and_stream(query: str, limit: int = 5) -> AsyncIterator[str]:
+async def search_and_stream(
+    query: str,
+    limit: int = 5,
+    min_score: float = 0.0,
+    history: list[dict] | None = None,
+) -> AsyncIterator[str]:
     """
     Async generator that yields SSE-formatted events:
       - event: sources  (JSON array of search results)
       - event: token    (single text token from Gemini)
       - event: done     (stream finished)
+
+    history: list of {"role": "user"|"assistant", "content": str} for multi-turn context.
     """
     # Step 1: Search
-    sources = search(query, limit)
+    sources = search(query, limit, min_score)
 
     # Yield sources event
     yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
 
-    # Step 2: Build prompt and stream from Gemini
+    # Step 2: Build contents for Gemini
     user_prompt = _build_prompt(query, sources)
+
+    contents = []
+    for msg in history or []:
+        role = "model" if msg["role"] == "assistant" else "user"
+        contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
+    contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
 
     try:
         response = _gemini.models.generate_content_stream(
             model="gemini-3-flash-preview",
-            contents=user_prompt,
+            contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 temperature=0.3,

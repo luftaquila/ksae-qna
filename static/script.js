@@ -4,8 +4,14 @@ const queryInput = document.getElementById("query");
 const sendBtn = document.getElementById("send");
 const authArea = document.getElementById("auth-area");
 const loginOverlay = document.getElementById("login-overlay");
+const sidebar = document.getElementById("sidebar");
+const sessionListEl = document.getElementById("session-list");
+const newChatBtn = document.getElementById("new-chat-btn");
+const sidebarToggle = document.getElementById("sidebar-toggle");
 
 let currentUser = null;
+let currentSessionId = null;
+let sessions = [];
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -19,6 +25,9 @@ async function checkAuth() {
     currentUser = null;
   }
   renderAuthUI();
+  if (currentUser) {
+    loadSessions();
+  }
 }
 
 function renderAuthUI() {
@@ -64,7 +73,11 @@ function updateCreditDisplay(credits) {
 async function handleLogout() {
   await fetch("/api/auth/logout", { method: "POST" });
   currentUser = null;
+  currentSessionId = null;
+  sessions = [];
+  renderSessionList();
   renderAuthUI();
+  chat.innerHTML = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +127,128 @@ function showTopupModal() {
 }
 
 // ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+async function loadSessions() {
+  try {
+    const res = await fetch("/api/sessions");
+    const data = await res.json();
+    sessions = data.sessions || [];
+  } catch {
+    sessions = [];
+  }
+  renderSessionList();
+}
+
+function renderSessionList() {
+  sessionListEl.innerHTML = "";
+  for (const s of sessions) {
+    const item = document.createElement("div");
+    item.className = "session-item" + (s.id === currentSessionId ? " active" : "");
+    item.innerHTML = `
+      <span class="session-item-title">${escapeHtml(s.title)}</span>
+      <button class="session-item-delete" title="삭제">&#10005;</button>
+    `;
+    item.querySelector(".session-item-title").addEventListener("click", () => switchSession(s.id));
+    item.querySelector(".session-item-delete").addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteSession(s.id);
+    });
+    sessionListEl.appendChild(item);
+  }
+}
+
+async function switchSession(id) {
+  currentSessionId = id;
+  renderSessionList();
+  chat.innerHTML = "";
+
+  try {
+    const res = await fetch(`/api/sessions/${id}/messages`);
+    const data = await res.json();
+    const messages = data.messages || [];
+
+    for (const msg of messages) {
+      if (msg.role === "user") {
+        appendMessage("user", msg.content);
+      } else if (msg.role === "assistant") {
+        const msgEl = appendAssistantShell();
+        const sourcesContainer = msgEl.querySelector(".sources");
+        const answerEl = msgEl.querySelector(".answer");
+
+        if (msg.sources) {
+          try {
+            const sources = JSON.parse(msg.sources);
+            renderSources(sourcesContainer, sources);
+          } catch {}
+        }
+        answerEl.innerHTML = marked.parse(msg.content || "");
+      }
+    }
+    scrollToBottom();
+  } catch {
+    chat.innerHTML = "";
+  }
+
+  // Close sidebar on mobile
+  closeSidebar();
+}
+
+function startNewChat() {
+  currentSessionId = null;
+  renderSessionList();
+  chat.innerHTML = "";
+  queryInput.focus();
+  closeSidebar();
+}
+
+async function deleteSession(id) {
+  try {
+    await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+    sessions = sessions.filter((s) => s.id !== id);
+    if (currentSessionId === id) {
+      currentSessionId = null;
+      chat.innerHTML = "";
+    }
+    renderSessionList();
+  } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar toggle (mobile)
+// ---------------------------------------------------------------------------
+let sidebarOverlay = null;
+
+function openSidebar() {
+  sidebar.classList.add("open");
+  if (!sidebarOverlay) {
+    sidebarOverlay = document.createElement("div");
+    sidebarOverlay.className = "sidebar-overlay active";
+    sidebarOverlay.addEventListener("click", closeSidebar);
+    document.body.appendChild(sidebarOverlay);
+  } else {
+    sidebarOverlay.classList.add("active");
+  }
+}
+
+function closeSidebar() {
+  sidebar.classList.remove("open");
+  if (sidebarOverlay) {
+    sidebarOverlay.classList.remove("active");
+  }
+}
+
+sidebarToggle.addEventListener("click", () => {
+  if (sidebar.classList.contains("open")) {
+    closeSidebar();
+  } else {
+    openSidebar();
+  }
+});
+
+newChatBtn.addEventListener("click", startNewChat);
+
+// ---------------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------------
 form.addEventListener("submit", async (e) => {
@@ -130,10 +265,13 @@ form.addEventListener("submit", async (e) => {
   const answerEl = msgEl.querySelector(".answer");
 
   try {
+    const body = { query };
+    if (currentSessionId) body.session_id = currentSessionId;
+
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify(body),
     });
 
     if (res.status === 401) {
@@ -176,9 +314,20 @@ form.addEventListener("submit", async (e) => {
           eventType = line.slice(7);
         } else if (line.startsWith("data: ")) {
           const data = line.slice(6);
-          handleEvent(eventType, data, sourcesContainer, answerEl, { fullText });
-          if (eventType === "token") {
-            try { fullText += JSON.parse(data); } catch {}
+
+          if (eventType === "session") {
+            try {
+              const payload = JSON.parse(data);
+              if (payload.session_id) {
+                currentSessionId = payload.session_id;
+                loadSessions();
+              }
+            } catch {}
+          } else {
+            handleEvent(eventType, data, sourcesContainer, answerEl, { fullText });
+            if (eventType === "token") {
+              try { fullText += JSON.parse(data); } catch {}
+            }
           }
           eventType = null;
         }

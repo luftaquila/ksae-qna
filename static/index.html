@@ -8,37 +8,47 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div class="header-top">
-        <div>
-          <h1>KSAE Q&A</h1>
-          <p class="subtitle">한국자동차공학회 대학생 자작자동차대회 Q&A 검색 챗봇</p>
-        </div>
-        <div id="auth-area"></div>
-      </div>
-    </header>
+  <div class="app-layout">
+    <aside id="sidebar" class="sidebar">
+      <button id="new-chat-btn" class="new-chat-btn">+ 새 대화</button>
+      <div id="session-list" class="session-list"></div>
+    </aside>
 
-    <div class="chat-wrapper">
-      <div id="chat" class="chat"></div>
-      <div id="login-overlay" class="login-overlay hidden">
-        <div class="overlay-content">
-          <p>질문하려면 로그인이 필요합니다</p>
-          <a href="/api/auth/login" class="login-btn google-login">Google로 로그인</a>
+    <div class="container">
+      <header>
+        <div class="header-top">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="sidebar-toggle" class="sidebar-toggle">&#9776;</button>
+            <div>
+              <h1>KSAE Q&A</h1>
+              <p class="subtitle">한국자동차공학회 대학생 자작자동차대회 Q&A 검색 챗봇</p>
+            </div>
+          </div>
+          <div id="auth-area"></div>
+        </div>
+      </header>
+
+      <div class="chat-wrapper">
+        <div id="chat" class="chat"></div>
+        <div id="login-overlay" class="login-overlay hidden">
+          <div class="overlay-content">
+            <p>질문하려면 로그인이 필요합니다</p>
+            <a href="/api/auth/login" class="login-btn google-login">Google로 로그인</a>
+          </div>
         </div>
       </div>
+
+      <form id="form" class="input-area">
+        <input
+          id="query"
+          type="text"
+          placeholder="질문을 입력하세요..."
+          autocomplete="off"
+          required
+        >
+        <button type="submit" id="send">전송</button>
+      </form>
     </div>
-
-    <form id="form" class="input-area">
-      <input
-        id="query"
-        type="text"
-        placeholder="질문을 입력하세요..."
-        autocomplete="off"
-        required
-      >
-      <button type="submit" id="send">전송</button>
-    </form>
   </div>
 
   <script src="/static/script.js"></script>
