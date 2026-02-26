@@ -2,6 +2,7 @@
 RAG search + Gemini LLM streaming for KSAE Q&A chatbot.
 """
 
+import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
@@ -18,6 +19,7 @@ _gemini: genai.Client | None = None
 
 EMBEDDING_MODEL = "BAAI/bge-m3"
 COLLECTION = "ksae-qna"
+_STREAM_DONE = object()
 
 SYSTEM_PROMPT = """\
 당신은 KSAE(한국자동차공학회) 대학생 자작자동차대회 Q&A 전문 어시스턴트입니다.
@@ -146,7 +148,13 @@ async def search_and_stream(
             ),
         )
 
-        for chunk in response:
+        # Iterate sync Gemini stream via thread pool to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        it = iter(response)
+        while True:
+            chunk = await loop.run_in_executor(None, next, it, _STREAM_DONE)
+            if chunk is _STREAM_DONE:
+                break
             if chunk.text:
                 data = json.dumps(chunk.text, ensure_ascii=False)
                 yield f"event: token\ndata: {data}\n\n"
