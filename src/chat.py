@@ -18,7 +18,10 @@ _qdrant: QdrantClient | None = None
 _gemini: genai.Client | None = None
 
 EMBEDDING_MODEL = "BAAI/bge-m3"
-COLLECTION = "ksae-qna"
+COLLECTIONS = {
+    "qna": "ksae-qna",
+    "rules": "ksae-formula-rules",
+}
 _STREAM_DONE = object()
 
 SYSTEM_PROMPT = """\
@@ -59,40 +62,57 @@ def init_resources():
     print("Gemini client initialized.")
 
 
-def search(query: str, limit: int = 5, min_score: float = 0.0) -> list[dict]:
-    """Encode query with BGE-M3 and search Qdrant for similar chunks."""
+def search(
+    query: str,
+    limit: int = 5,
+    min_score: float = 0.0,
+    collections: list[str] | None = None,
+) -> list[dict]:
+    """Encode query with BGE-M3 and search Qdrant for similar chunks.
+
+    *collections* is a list of short keys (``"qna"``, ``"rules"``).
+    When ``None`` or empty, all collections are searched.
+    """
+    if not collections:
+        collections = list(COLLECTIONS.keys())
+    collection_names = [COLLECTIONS[k] for k in collections if k in COLLECTIONS]
+
     vector = _model.encode(query).tolist()
-    results = _qdrant.query_points(
-        collection_name=COLLECTION,
-        query=vector,
-        limit=limit,
-    )
 
-    output = []
-    for hit in results.points:
-        if hit.score < min_score:
-            continue
+    output: list[dict] = []
+    for col_name in collection_names:
+        results = _qdrant.query_points(
+            collection_name=col_name,
+            query=vector,
+            limit=limit,
+        )
 
-        payload = hit.payload or {}
-        content = payload.get("content", "") or payload.get("chunk_text", "")
+        for hit in results.points:
+            if hit.score < min_score:
+                continue
 
-        if "title" in payload:
-            source = f"[{payload.get('category', '')}] {payload['title']}"
-            url = payload.get("url", "")
-        elif "chapter" in payload:
-            source = f"제{payload.get('chapter_num', '')}장 {payload.get('chapter', '')} > {payload.get('section', '')}"
-            url = ""
-        else:
-            source = ""
-            url = ""
+            payload = hit.payload or {}
+            content = payload.get("content", "") or payload.get("chunk_text", "")
 
-        output.append({
-            "score": hit.score,
-            "source": source,
-            "url": url,
-            "content": content,
-        })
-    return output
+            if "title" in payload:
+                source = f"[{payload.get('category', '')}] {payload['title']}"
+                url = payload.get("url", "")
+            elif "chapter" in payload:
+                source = f"제{payload.get('chapter_num', '')}장 {payload.get('chapter', '')} > {payload.get('section', '')}"
+                url = ""
+            else:
+                source = ""
+                url = ""
+
+            output.append({
+                "score": hit.score,
+                "source": source,
+                "url": url,
+                "content": content,
+            })
+
+    output.sort(key=lambda x: x["score"], reverse=True)
+    return output[:limit]
 
 
 def _build_prompt(query: str, sources: list[dict]) -> str:
@@ -113,6 +133,7 @@ async def search_and_stream(
     limit: int = 5,
     min_score: float = 0.0,
     history: list[dict] | None = None,
+    collections: list[str] | None = None,
 ) -> AsyncIterator[str]:
     """
     Async generator that yields SSE-formatted events:
@@ -121,9 +142,10 @@ async def search_and_stream(
       - event: done     (stream finished)
 
     history: list of {"role": "user"|"assistant", "content": str} for multi-turn context.
+    collections: list of collection keys ("qna", "rules") to search.
     """
     # Step 1: Search
-    sources = search(query, limit, min_score)
+    sources = search(query, limit, min_score, collections)
 
     # Yield sources event
     yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"

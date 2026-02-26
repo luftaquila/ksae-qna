@@ -667,10 +667,61 @@ header h1 {
    ========================================================================== */
 .input-area {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding: 12px 20px;
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
+}
+
+/* Collection selector chips */
+.collection-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.collection-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  border: 1.5px solid var(--border-color);
+  border-radius: 14px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.collection-chip input {
+  display: none;
+}
+
+.collection-chip span {
+  display: block;
+  text-align: center;
+}
+
+.collection-chip:has(input:checked) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
+.collection-chip:hover {
+  border-color: var(--text-tertiary);
+}
+
+.collection-chip:has(input:checked):hover {
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  border-color: var(--color-primary);
 }
 
 .input-area input {

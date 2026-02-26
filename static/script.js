@@ -330,7 +330,8 @@ form.addEventListener("submit", async (e) => {
   const answerEl = msgEl.querySelector(".answer");
 
   try {
-    const body = { query };
+    const collections = [...form.querySelectorAll('input[name="collections"]:checked')].map((el) => el.value);
+    const body = { query, collections };
     if (currentSessionId) body.session_id = currentSessionId;
 
     const res = await fetch("/api/chat", {
