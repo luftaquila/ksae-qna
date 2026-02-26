@@ -1,0 +1,73 @@
+# KSAE Q&A
+
+KSAE(한국자동차공학회) 대학생 자작자동차대회 Q&A 게시판을 크롤링하여 RAG 파이프라인으로 벡터 DB에 저장하고, 웹 챗봇으로 질의응답하는 시스템.
+
+## 프로젝트 구조
+
+```
+ksae-qna/
+├── main.py                # CLI 파이프라인 (crawl → chunk → embed → upload)
+├── mcp_server.py          # MCP 프로토콜 기반 시맨틱 검색 서버 (stdin/stdout JSON-RPC)
+├── server.py              # FastAPI 웹 챗봇 서버 (SSE 스트리밍)
+├── requirements.txt
+├── .env                   # QDRANT_URL, QDRANT_API_KEY, GOOGLE_API_KEY
+├── src/
+│   ├── crawler.py         # KSAE Q&A 게시판 크롤링 (목록 + 상세)
+│   ├── chunker.py         # 텍스트 청킹 (512 토큰, 50 오버랩)
+│   ├── embedder.py        # BGE-M3 임베딩 (1024차원, 로컬/원격)
+│   ├── uploader.py        # Qdrant 벡터 DB 업로드
+│   └── chat.py            # RAG 검색 + Gemini LLM 스트리밍 호출
+├── static/
+│   ├── index.html         # 채팅 UI
+│   ├── style.css          # 스타일
+│   └── script.js          # SSE 수신 + 마크다운 렌더링
+└── data/
+    ├── raw/               # 크롤링 원본 (posts.json, post_list.json)
+    └── processed/         # 처리 결과 (chunks.json, embeddings.npy)
+```
+
+## 핵심 기술 스택
+
+- **임베딩**: BAAI/bge-m3 (sentence-transformers), 1024차원 dense vector
+- **벡터 DB**: Qdrant (원격, HTTPS, JWT 인증), 코사인 유사도
+- **LLM**: Google Gemini 3 Flash (google-genai SDK, 스트리밍)
+- **웹 서버**: FastAPI + uvicorn, SSE 스트리밍
+- **프론트엔드**: 바닐라 JS, fetch + ReadableStream, marked.js
+
+## 실행 방법
+
+```bash
+# 데이터 파이프라인 (크롤링 → 벡터 DB 업로드)
+python main.py                        # 전체 파이프라인 (incremental)
+python main.py crawl                  # 크롤링만
+python main.py chunk                  # 청킹만
+python main.py embed                  # 임베딩만
+python main.py upload                 # 업로드만
+
+# 웹 챗봇 서버
+python server.py                      # http://localhost:8000
+
+# MCP 서버 (Claude 등 AI 클라이언트용)
+python mcp_server.py                  # stdin/stdout JSON-RPC
+```
+
+## 환경 변수 (.env)
+
+- `QDRANT_URL` — Qdrant 서버 URL (기본: https://vectordb.luftaquila.io:443)
+- `QDRANT_API_KEY` — Qdrant JWT 인증 토큰
+- `GOOGLE_API_KEY` — Gemini API 키 (챗봇 서버 필수)
+
+## 코딩 컨벤션
+
+- Python 타입 힌트 사용 (`list[dict]`, `str | None` 등)
+- 글로벌 리소스는 모듈 레벨 변수로 선언, 초기화 함수에서 한 번만 로드
+- 검색 로직은 `mcp_server.py`와 `src/chat.py`에서 동일 패턴 사용 (encode → query_points → payload 추출)
+- Qdrant 컬렉션: `ksae-qna` (Q&A 게시판), `ksae-formula-rules` (규정집)
+- Payload 스키마: `id`, `category`, `title`, `author`, `date`, `url`, `content`, `chunk_index`
+
+## 주의사항
+
+- `data/` 디렉터리는 .gitignore에 포함 (크롤링 데이터 대용량)
+- `.env` 파일은 .gitignore에 포함 (API 키 보안)
+- BGE-M3 모델 첫 로딩 시 다운로드 필요 (~2GB)
+- 크롤러는 KSAE 서버의 약한 DH 키 대응을 위해 커스텀 SSL 설정 사용

@@ -6,3 +6,7 @@ numpy
 qdrant-client
 tqdm
 click
+fastapi
+uvicorn[standard]
+python-dotenv
+google-genai

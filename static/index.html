@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KSAE Q&A</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>KSAE Q&A</h1>
+      <p class="subtitle">한국자동차공학회 대학생 자작자동차대회 Q&A 검색 챗봇</p>
+    </header>
+
+    <div id="chat" class="chat"></div>
+
+    <form id="form" class="input-area">
+      <input
+        id="query"
+        type="text"
+        placeholder="질문을 입력하세요..."
+        autocomplete="off"
+        required
+      >
+      <button type="submit" id="send">전송</button>
+    </form>
+  </div>
+
+  <script src="/static/script.js"></script>
+</body>
+</html>
