@@ -10,3 +10,7 @@ fastapi
 uvicorn[standard]
 python-dotenv
 google-genai
+authlib
+httpx
+PyJWT
+itsdangerous

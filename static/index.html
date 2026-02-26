@@ -10,11 +10,24 @@
 <body>
   <div class="container">
     <header>
-      <h1>KSAE Q&A</h1>
-      <p class="subtitle">한국자동차공학회 대학생 자작자동차대회 Q&A 검색 챗봇</p>
+      <div class="header-top">
+        <div>
+          <h1>KSAE Q&A</h1>
+          <p class="subtitle">한국자동차공학회 대학생 자작자동차대회 Q&A 검색 챗봇</p>
+        </div>
+        <div id="auth-area"></div>
+      </div>
     </header>
 
-    <div id="chat" class="chat"></div>
+    <div class="chat-wrapper">
+      <div id="chat" class="chat"></div>
+      <div id="login-overlay" class="login-overlay hidden">
+        <div class="overlay-content">
+          <p>질문하려면 로그인이 필요합니다</p>
+          <a href="/api/auth/login" class="login-btn google-login">Google로 로그인</a>
+        </div>
+      </div>
+    </div>
 
     <form id="form" class="input-area">
       <input
