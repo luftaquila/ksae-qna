@@ -159,6 +159,9 @@ async def search_and_stream(
         contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
     contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
 
+    input_tokens = 0
+    output_tokens = 0
+
     try:
         response = _gemini.models.generate_content_stream(
             model="gemini-3-flash-preview",
@@ -180,8 +183,18 @@ async def search_and_stream(
             if chunk.text:
                 data = json.dumps(chunk.text, ensure_ascii=False)
                 yield f"event: token\ndata: {data}\n\n"
+            # Capture usage metadata from the last chunk
+            if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                um = chunk.usage_metadata
+                if hasattr(um, "prompt_token_count") and um.prompt_token_count:
+                    input_tokens = um.prompt_token_count
+                if hasattr(um, "candidates_token_count") and um.candidates_token_count:
+                    output_tokens = um.candidates_token_count
     except Exception as e:
         error_msg = json.dumps(f"LLM 호출 오류: {e}", ensure_ascii=False)
         yield f"event: token\ndata: {error_msg}\n\n"
 
+    # Send usage metadata before done
+    usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens})
+    yield f"event: usage\ndata: {usage_data}\n\n"
     yield "event: done\ndata: {}\n\n"

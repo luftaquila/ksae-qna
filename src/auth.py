@@ -23,6 +23,27 @@ COOKIE_NAME = "token"
 # Module-level resources (initialised once)
 # ---------------------------------------------------------------------------
 oauth = OAuth()
+ADMIN_EMAILS: set[str] = set()
+
+
+def init_admin_emails() -> None:
+    """Parse ADMIN_EMAILS env var (comma-separated) into a lowercase set."""
+    raw = os.environ.get("ADMIN_EMAILS", "")
+    ADMIN_EMAILS.clear()
+    for email in raw.split(","):
+        email = email.strip().lower()
+        if email:
+            ADMIN_EMAILS.add(email)
+
+
+def is_admin(request: Request) -> dict | None:
+    """Return user dict if the current user is an admin, else None."""
+    user = get_current_user(request)
+    if not user:
+        return None
+    if user["email"].lower() in ADMIN_EMAILS:
+        return user
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +81,7 @@ def init_db() -> None:
             email       TEXT    NOT NULL,
             name        TEXT    NOT NULL,
             picture     TEXT,
-            credits     INTEGER NOT NULL DEFAULT 30,
+            credits     INTEGER NOT NULL DEFAULT 1,
             created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
             updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
         )
@@ -101,6 +122,15 @@ def init_db() -> None:
         )
         """
     )
+    conn.commit()
+
+    # Migrate: add token usage columns to messages
+    for col in ("input_tokens", "output_tokens"):
+        try:
+            conn.execute(f"ALTER TABLE messages ADD COLUMN {col} INTEGER")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
     conn.commit()
     conn.close()
 
@@ -301,11 +331,18 @@ def update_session_title(session_id: int, user_id: int, title: str) -> bool:
     return updated
 
 
-def add_message(session_id: int, role: str, content: str, sources: str | None = None) -> dict:
+def add_message(
+    session_id: int,
+    role: str,
+    content: str,
+    sources: str | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+) -> dict:
     conn = _get_conn()
     cur = conn.execute(
-        "INSERT INTO messages (session_id, role, content, sources) VALUES (?, ?, ?, ?)",
-        (session_id, role, content, sources),
+        "INSERT INTO messages (session_id, role, content, sources, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?)",
+        (session_id, role, content, sources, input_tokens, output_tokens),
     )
     conn.execute(
         "UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", (session_id,)
@@ -317,6 +354,74 @@ def add_message(session_id: int, role: str, content: str, sources: str | None = 
 
 
 def get_messages(session_id: int) -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC", (session_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Admin queries
+# ---------------------------------------------------------------------------
+def list_all_users() -> list[dict]:
+    """Return all users ordered by created_at DESC."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, google_id, email, name, picture, credits, created_at, updated_at FROM users ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def admin_set_credits(user_id: int, credits: int, memo: str = "관리자 조정") -> int | None:
+    """Set a user's credits to an absolute value and record the delta as an admin transaction."""
+    conn = _get_conn()
+    row = conn.execute("SELECT credits FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        return None
+
+    old_credits = row["credits"]
+    delta = credits - old_credits
+
+    conn.execute(
+        "UPDATE users SET credits = ?, updated_at = datetime('now') WHERE id = ?",
+        (credits, user_id),
+    )
+    conn.execute(
+        "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
+        (user_id, delta, "admin", memo),
+    )
+    conn.commit()
+    conn.close()
+    return credits
+
+
+def list_all_sessions(user_id: int | None = None) -> list[dict]:
+    """Return sessions with user info. Optionally filter by user_id."""
+    conn = _get_conn()
+    if user_id:
+        rows = conn.execute(
+            """SELECT s.*, u.email, u.name AS user_name
+               FROM sessions s JOIN users u ON s.user_id = u.id
+               WHERE s.user_id = ?
+               ORDER BY s.updated_at DESC""",
+            (user_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT s.*, u.email, u.name AS user_name
+               FROM sessions s JOIN users u ON s.user_id = u.id
+               ORDER BY s.updated_at DESC"""
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def admin_get_messages(session_id: int) -> list[dict]:
+    """Get messages for a session without ownership check."""
     conn = _get_conn()
     rows = conn.execute(
         "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC", (session_id,)

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PitBot Admin</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/admin.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    (function() {
+      var t = localStorage.getItem("theme");
+      if (t) document.documentElement.setAttribute("data-theme", t);
+      else if (window.matchMedia("(prefers-color-scheme: dark)").matches)
+        document.documentElement.setAttribute("data-theme", "dark");
+    })();
+  </script>
+</head>
+<body>
+  <div class="admin-layout">
+    <div class="admin-header">
+      <div class="admin-header-left">
+        <h1>PitBot</h1>
+        <span class="admin-badge">Admin</span>
+      </div>
+      <div class="admin-header-right">
+        <a href="/" class="admin-back-link">채팅으로 돌아가기</a>
+        <button id="theme-toggle" class="theme-toggle" aria-label="테마 전환">🌙</button>
+      </div>
+    </div>
+
+    <div class="admin-tabs">
+      <button class="admin-tab active" data-tab="users">사용자 관리</button>
+      <button class="admin-tab" data-tab="conversations">대화 기록</button>
+    </div>
+
+    <div class="admin-content">
+      <!-- Users Tab -->
+      <div id="tab-users" class="tab-panel active">
+        <div class="admin-search">
+          <input type="text" id="user-search" placeholder="이름 또는 이메일로 검색...">
+        </div>
+        <table class="users-table">
+          <thead>
+            <tr>
+              <th>사용자</th>
+              <th>이메일</th>
+              <th>크레딧</th>
+              <th>가입일</th>
+            </tr>
+          </thead>
+          <tbody id="users-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Conversations Tab -->
+      <div id="tab-conversations" class="tab-panel">
+        <div class="conversations-layout">
+          <div class="conv-sidebar">
+            <div class="conv-sidebar-header">
+              <div class="conv-user-filter">
+                <select id="conv-user-select">
+                  <option value="">전체 사용자</option>
+                </select>
+              </div>
+            </div>
+            <div class="conv-session-list" id="conv-session-list"></div>
+          </div>
+          <div class="conv-messages" id="conv-messages">
+            <div class="conv-empty">세션을 선택하세요</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>

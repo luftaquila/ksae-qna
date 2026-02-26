@@ -38,7 +38,7 @@ function renderAuthUI() {
     const img = currentUser.picture
       ? `<img src="${escapeAttr(currentUser.picture)}" class="profile-img" alt="" referrerpolicy="no-referrer">`
       : "";
-    const lowClass = currentUser.credits <= 5 ? " low" : "";
+    const lowClass = currentUser.credits <= 2 ? " low" : "";
 
     authArea.innerHTML = `
       <div class="profile-info">
@@ -67,7 +67,7 @@ function updateCreditDisplay(credits) {
   const badge = document.getElementById("credit-badge");
   if (!badge) return;
   badge.textContent = `${credits} 토큰`;
-  badge.classList.toggle("low", credits <= 5);
+  badge.classList.toggle("low", credits <= 2);
 }
 
 async function handleLogout() {

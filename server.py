@@ -16,6 +16,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from src.auth import (
     add_credits,
     add_message,
+    admin_get_messages,
+    admin_set_credits,
     clear_auth_cookie,
     create_jwt,
     create_session,
@@ -26,8 +28,12 @@ from src.auth import (
     get_or_create_user,
     get_session,
     get_transactions,
+    init_admin_emails,
     init_db,
     init_oauth,
+    is_admin,
+    list_all_sessions,
+    list_all_users,
     list_sessions,
     oauth,
     set_auth_cookie,
@@ -42,6 +48,7 @@ load_dotenv()
 async def lifespan(app: FastAPI):
     init_db()
     init_oauth()
+    init_admin_emails()
     init_resources()
     yield
 
@@ -63,6 +70,11 @@ class SessionPatch(BaseModel):
 
 class TopupRequest(BaseModel):
     amount: int
+
+
+class AdminCreditRequest(BaseModel):
+    credits: int
+    memo: str = "관리자 조정"
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +253,8 @@ async def chat(request: Request, req: ChatRequest):
     async def stream_and_persist():
         full_text = ""
         sources_json = None
+        input_tokens = None
+        output_tokens = None
 
         async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections):
             yield event
@@ -259,9 +273,16 @@ async def chat(request: Request, req: ChatRequest):
                         full_text += json.loads(line[6:])
                     except Exception:
                         pass
+                elif line.startswith("data: ") and "usage" in event:
+                    try:
+                        usage = json.loads(line[6:])
+                        input_tokens = usage.get("input_tokens")
+                        output_tokens = usage.get("output_tokens")
+                    except Exception:
+                        pass
 
         # Persist assistant message
-        add_message(session_id, "assistant", full_text, sources_json)
+        add_message(session_id, "assistant", full_text, sources_json, input_tokens, output_tokens)
 
         # Send session_id to client
         yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
@@ -280,6 +301,63 @@ async def chat(request: Request, req: ChatRequest):
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Admin routes
+# ---------------------------------------------------------------------------
+@app.get("/admin")
+async def admin_page(request: Request):
+    user = is_admin(request)
+    if not user:
+        return RedirectResponse(url="/", status_code=302)
+    return FileResponse("static/admin.html")
+
+
+@app.get("/api/admin/check")
+async def admin_check(request: Request):
+    user = is_admin(request)
+    if not user:
+        return JSONResponse({"admin": False}, status_code=403)
+    return {"admin": True, "email": user["email"]}
+
+
+@app.get("/api/admin/users")
+async def admin_users(request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    return {"users": list_all_users()}
+
+
+@app.patch("/api/admin/users/{user_id}/credits")
+async def admin_update_credits(user_id: int, body: AdminCreditRequest, request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    result = admin_set_credits(user_id, body.credits, body.memo)
+    if result is None:
+        return JSONResponse({"error": "사용자를 찾을 수 없습니다"}, status_code=404)
+    return {"credits": result}
+
+
+@app.get("/api/admin/users/{user_id}/transactions")
+async def admin_user_transactions(user_id: int, request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    return {"transactions": get_transactions(user_id, limit=100)}
+
+
+@app.get("/api/admin/users/{user_id}/sessions")
+async def admin_user_sessions(user_id: int, request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    return {"sessions": list_all_sessions(user_id)}
+
+
+@app.get("/api/admin/sessions/{session_id}/messages")
+async def admin_session_messages(session_id: int, request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    return {"messages": admin_get_messages(session_id)}
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")

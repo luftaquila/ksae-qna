@@ -1,0 +1,468 @@
+/* ==========================================================================
+   Admin Page Layout
+   ========================================================================== */
+.admin-layout {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100dvh;
+  background: var(--bg-container);
+}
+
+.admin-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.admin-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-header-left h1 {
+  font-size: 1.25rem;
+  color: var(--text-heading);
+}
+
+.admin-badge {
+  display: inline-block;
+  background: #e74c3c;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.admin-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-back-link {
+  font-size: 0.82rem;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.admin-back-link:hover {
+  text-decoration: underline;
+}
+
+/* ==========================================================================
+   Tabs
+   ========================================================================== */
+.admin-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.admin-tab {
+  padding: 12px 24px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.admin-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.admin-tab.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+}
+
+.admin-content {
+  flex: 1;
+  overflow: hidden;
+}
+
+.tab-panel {
+  display: none;
+  height: 100%;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+/* ==========================================================================
+   Users Tab
+   ========================================================================== */
+.admin-search {
+  margin-bottom: 16px;
+}
+
+.admin-search input {
+  width: 100%;
+  max-width: 400px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-input);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.admin-search input:focus {
+  border-color: var(--color-primary);
+}
+
+.admin-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.users-table th,
+.users-table td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.users-table th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--bg-sidebar);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.users-table tr:hover td {
+  background: var(--bg-hover);
+}
+
+.user-picture {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.credit-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.credit-value {
+  font-weight: 600;
+  min-width: 40px;
+}
+
+.credit-adjust-btn {
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.credit-adjust-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Inline credit editor */
+.credit-editor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.credit-editor input {
+  width: 70px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  font-size: 0.82rem;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.credit-editor input:focus {
+  border-color: var(--color-primary);
+}
+
+.credit-save-btn {
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.credit-save-btn:hover {
+  background: var(--color-primary-hover);
+}
+
+.credit-cancel-btn {
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.credit-cancel-btn:hover {
+  background: var(--bg-hover);
+}
+
+/* ==========================================================================
+   Admin token popover (reuses .token-popover from style.css)
+   ========================================================================== */
+.credit-cell .token-wrapper {
+  position: relative;
+}
+
+.credit-cell .token-popover {
+  left: 0;
+  right: auto;
+}
+
+/* ==========================================================================
+   Conversations Tab — 2-column layout
+   ========================================================================== */
+.conversations-layout {
+  display: flex;
+  height: 100%;
+  gap: 0;
+}
+
+.conv-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.conv-sidebar-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.conv-user-filter select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border-input);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.conv-session-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.conv-session-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.conv-session-item:hover {
+  background: var(--bg-hover);
+}
+
+.conv-session-item.active {
+  background: var(--bg-sidebar-active);
+}
+
+.conv-session-title {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conv-session-meta {
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.conv-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.conv-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--text-tertiary);
+  font-size: 0.9rem;
+}
+
+/* Messages in admin viewer */
+.admin-msg {
+  max-width: 85%;
+}
+
+.admin-msg.user {
+  align-self: flex-end;
+}
+
+.admin-msg-role {
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+  margin-bottom: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.admin-msg-content {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.admin-msg.user .admin-msg-role {
+  text-align: right;
+}
+
+.admin-msg.user .admin-msg-content {
+  background: var(--color-primary);
+  color: #fff;
+  border-radius: 14px 14px 4px 14px;
+}
+
+.admin-msg.user .admin-msg-footer {
+  justify-content: flex-end;
+}
+
+.admin-msg.assistant .admin-msg-content {
+  background: var(--bg-assistant-msg);
+  border-radius: 4px 14px 14px 14px;
+}
+
+.admin-msg.assistant .admin-msg-content p { margin-bottom: 0.5em; }
+.admin-msg.assistant .admin-msg-content p:last-child { margin-bottom: 0; }
+.admin-msg.assistant .admin-msg-content ul,
+.admin-msg.assistant .admin-msg-content ol { padding-left: 1.4em; margin-bottom: 0.5em; }
+.admin-msg.assistant .admin-msg-content code { background: var(--bg-code-inline); padding: 1px 5px; border-radius: 3px; font-size: 0.88em; }
+.admin-msg.assistant .admin-msg-content pre { background: #282c34; color: #abb2bf; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 0.5em 0; }
+.admin-msg.assistant .admin-msg-content pre code { background: none; padding: 0; color: inherit; }
+
+/* Token usage badge */
+.admin-msg-footer {
+  margin-top: 4px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.token-usage-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  background: var(--bg-sidebar);
+  padding: 2px 8px;
+  border-radius: 8px;
+}
+
+.token-usage-badge span {
+  font-weight: 600;
+}
+
+.admin-msg-time {
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+}
+
+/* ==========================================================================
+   Scrollbar
+   ========================================================================== */
+.tab-panel::-webkit-scrollbar,
+.conv-session-list::-webkit-scrollbar,
+.conv-messages::-webkit-scrollbar { width: 6px; }
+
+.tab-panel::-webkit-scrollbar-track,
+.conv-session-list::-webkit-scrollbar-track,
+.conv-messages::-webkit-scrollbar-track { background: transparent; }
+
+.tab-panel::-webkit-scrollbar-thumb,
+.conv-session-list::-webkit-scrollbar-thumb,
+.conv-messages::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+@media (max-width: 768px) {
+  .conversations-layout {
+    flex-direction: column;
+  }
+
+  .conv-sidebar {
+    width: 100%;
+    max-height: 40%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .users-table {
+    font-size: 0.78rem;
+  }
+
+  .users-table th,
+  .users-table td {
+    padding: 8px 10px;
+  }
+}

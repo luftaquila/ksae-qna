@@ -1,0 +1,411 @@
+const themeToggle = document.getElementById("theme-toggle");
+const usersTbody = document.getElementById("users-tbody");
+const userSearch = document.getElementById("user-search");
+const convUserSelect = document.getElementById("conv-user-select");
+const convSessionList = document.getElementById("conv-session-list");
+const convMessages = document.getElementById("conv-messages");
+
+let allUsers = [];
+let currentConvSessionId = null;
+
+// ---------------------------------------------------------------------------
+// Theme (reused from script.js)
+// ---------------------------------------------------------------------------
+function initTheme() {
+  const saved = localStorage.getItem("theme");
+  const theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", theme);
+  themeToggle.textContent = theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
+}
+
+function setTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("theme", theme);
+  themeToggle.textContent = theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
+}
+
+themeToggle.addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme");
+  setTheme(current === "dark" ? "light" : "dark");
+});
+
+// ---------------------------------------------------------------------------
+// Admin check
+// ---------------------------------------------------------------------------
+async function checkAdmin() {
+  try {
+    const res = await fetch("/api/admin/check");
+    if (!res.ok) {
+      window.location.href = "/";
+      return false;
+    }
+    return true;
+  } catch {
+    window.location.href = "/";
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+document.querySelectorAll(".admin-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".admin-tab").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById(`tab-${tab.dataset.tab}`).classList.add("active");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Users tab
+// ---------------------------------------------------------------------------
+async function loadUsers() {
+  try {
+    const res = await fetch("/api/admin/users");
+    const data = await res.json();
+    allUsers = data.users || [];
+  } catch {
+    allUsers = [];
+  }
+  renderUsers();
+  populateUserFilter();
+}
+
+function renderUsers(filter = "") {
+  const q = filter.toLowerCase();
+  const filtered = q
+    ? allUsers.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+    : allUsers;
+
+  usersTbody.innerHTML = filtered
+    .map((u) => {
+      const pic = u.picture
+        ? `<img src="${escapeAttr(u.picture)}" class="user-picture" referrerpolicy="no-referrer">`
+        : "";
+      const date = (u.created_at || "").slice(0, 10);
+      const lowClass = u.credits <= 2 ? " low" : "";
+      return `<tr data-user-id="${u.id}">
+        <td>${pic}${escapeHtml(u.name)}</td>
+        <td>${escapeHtml(u.email)}</td>
+        <td>
+          <div class="credit-cell" id="credit-cell-${u.id}">
+            <div class="token-wrapper">
+              <span class="credit-badge${lowClass}" onclick="toggleAdminPopover(${u.id})">${u.credits} 토큰</span>
+            </div>
+            <button class="credit-adjust-btn" onclick="showCreditEditor(${u.id}, ${u.credits})">조정</button>
+          </div>
+        </td>
+        <td>${date}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+userSearch.addEventListener("input", () => {
+  renderUsers(userSearch.value);
+});
+
+// Credit editor
+window.showCreditEditor = function (userId, currentCredits) {
+  const cell = document.getElementById(`credit-cell-${userId}`);
+  if (!cell) return;
+  cell.innerHTML = `
+    <div class="credit-editor">
+      <input type="number" id="credit-input-${userId}" value="${currentCredits}">
+      <button class="credit-save-btn" onclick="saveCredits(${userId})">저장</button>
+      <button class="credit-cancel-btn" onclick="cancelCreditEdit(${userId}, ${currentCredits})">취소</button>
+    </div>
+  `;
+  document.getElementById(`credit-input-${userId}`).focus();
+};
+
+window.saveCredits = async function (userId) {
+  const input = document.getElementById(`credit-input-${userId}`);
+  if (!input) return;
+
+  const credits = parseInt(input.value, 10);
+  if (isNaN(credits) || credits < 0) return;
+
+  const memo = "관리자 조정";
+
+  try {
+    const res = await fetch(`/api/admin/users/${userId}/credits`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credits, memo }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      // Update local data
+      const user = allUsers.find((u) => u.id === userId);
+      if (user) user.credits = data.credits;
+      renderUsers(userSearch.value);
+    } else {
+      const err = await res.json();
+      alert(err.error || "저장에 실패했습니다");
+    }
+  } catch {
+    alert("저장에 실패했습니다");
+  }
+};
+
+window.cancelCreditEdit = function (userId, currentCredits) {
+  const cell = document.getElementById(`credit-cell-${userId}`);
+  if (!cell) return;
+  cell.innerHTML = `
+    <span class="credit-value">${currentCredits}</span>
+    <button class="credit-adjust-btn" onclick="showCreditEditor(${userId}, ${currentCredits})">조정</button>
+  `;
+};
+
+// Token history popover (same UI as chat page)
+let adminPopover = null;
+let adminPopoverUserId = null;
+
+window.toggleAdminPopover = function (userId) {
+  if (adminPopover && adminPopoverUserId === userId) {
+    closeAdminPopover();
+    return;
+  }
+  closeAdminPopover();
+
+  adminPopoverUserId = userId;
+  const wrapper = document.querySelector(`#credit-cell-${userId} .token-wrapper`);
+  if (!wrapper) return;
+
+  adminPopover = document.createElement("div");
+  adminPopover.className = "token-popover";
+  adminPopover.innerHTML = `
+    <div class="token-popover-header">토큰 내역</div>
+    <div class="token-history"><div class="token-history-loading">불러오는 중...</div></div>
+  `;
+  wrapper.appendChild(adminPopover);
+
+  loadAdminTransactions(userId);
+  setTimeout(() => document.addEventListener("click", onAdminPopoverOutside), 0);
+};
+
+function closeAdminPopover() {
+  if (adminPopover) {
+    adminPopover.remove();
+    adminPopover = null;
+    adminPopoverUserId = null;
+  }
+  document.removeEventListener("click", onAdminPopoverOutside);
+}
+
+function onAdminPopoverOutside(e) {
+  if (adminPopover && !adminPopover.contains(e.target) && !e.target.classList.contains("credit-badge")) {
+    closeAdminPopover();
+  }
+}
+
+async function loadAdminTransactions(userId) {
+  const historyEl = adminPopover?.querySelector(".token-history");
+  if (!historyEl) return;
+
+  try {
+    const res = await fetch(`/api/admin/users/${userId}/transactions`);
+    const data = await res.json();
+    const txns = data.transactions || [];
+
+    if (!txns.length) {
+      historyEl.innerHTML = `<div class="token-history-empty">내역이 없습니다</div>`;
+      return;
+    }
+
+    historyEl.innerHTML = txns.map((t) => {
+      const isUsage = t.amount < 0;
+      const sign = isUsage ? "" : "+";
+      const cls = isUsage ? "usage" : "purchase";
+      const date = (t.created_at || "").slice(0, 16).replace("T", " ");
+      return `<div class="token-tx ${cls}">
+        <div class="token-tx-info">
+          <span class="token-tx-memo">${escapeHtml(t.memo || t.type)}</span>
+          <span class="token-tx-date">${date}</span>
+        </div>
+        <span class="token-tx-amount">${sign}${t.amount}</span>
+      </div>`;
+    }).join("");
+  } catch {
+    historyEl.innerHTML = `<div class="token-history-empty">불러오기 실패</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Conversations tab
+// ---------------------------------------------------------------------------
+function populateUserFilter() {
+  convUserSelect.innerHTML = `<option value="">전체 사용자</option>`;
+  for (const u of allUsers) {
+    convUserSelect.innerHTML += `<option value="${u.id}">${escapeHtml(u.name)} (${escapeHtml(u.email)})</option>`;
+  }
+}
+
+convUserSelect.addEventListener("change", () => {
+  loadSessions(convUserSelect.value);
+});
+
+async function loadSessions(userId) {
+  if (!userId) {
+    convSessionList.innerHTML = "";
+    convMessages.innerHTML = `<div class="conv-empty">사용자를 선택하세요</div>`;
+    currentConvSessionId = null;
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/admin/users/${userId}/sessions`);
+    const data = await res.json();
+    const sessions = data.sessions || [];
+    renderSessionList(sessions);
+  } catch {
+    convSessionList.innerHTML = "";
+  }
+}
+
+function renderSessionList(sessions) {
+  currentConvSessionId = null;
+  convMessages.innerHTML = `<div class="conv-empty">세션을 선택하세요</div>`;
+
+  convSessionList.innerHTML = sessions
+    .map((s) => {
+      const date = (s.updated_at || "").slice(0, 16).replace("T", " ");
+      const userName = s.user_name || "";
+      return `<div class="conv-session-item" data-session-id="${s.id}">
+        <div class="conv-session-title">${escapeHtml(s.title)}</div>
+        <div class="conv-session-meta">${escapeHtml(userName)} &middot; ${date}</div>
+      </div>`;
+    })
+    .join("");
+
+  convSessionList.querySelectorAll(".conv-session-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      convSessionList.querySelectorAll(".conv-session-item").forEach((e) => e.classList.remove("active"));
+      el.classList.add("active");
+      loadMessages(parseInt(el.dataset.sessionId, 10));
+    });
+  });
+}
+
+async function loadMessages(sessionId) {
+  currentConvSessionId = sessionId;
+  convMessages.innerHTML = `<div class="conv-empty">불러오는 중...</div>`;
+
+  try {
+    const res = await fetch(`/api/admin/sessions/${sessionId}/messages`);
+    const data = await res.json();
+    const messages = data.messages || [];
+
+    if (!messages.length) {
+      convMessages.innerHTML = `<div class="conv-empty">메시지가 없습니다</div>`;
+      return;
+    }
+
+    convMessages.innerHTML = "";
+    for (const msg of messages) {
+      const role = msg.role === "user" ? "user" : "assistant";
+      const roleLabel = role === "user" ? "사용자" : "어시스턴트";
+      const time = (msg.created_at || "").slice(11, 19);
+
+      const el = document.createElement("div");
+      el.className = `admin-msg ${role}`;
+
+      const roleEl = document.createElement("div");
+      roleEl.className = "admin-msg-role";
+      roleEl.textContent = roleLabel;
+      el.appendChild(roleEl);
+
+      // Sources (assistant only)
+      if (role === "assistant" && msg.sources) {
+        try {
+          const sources = JSON.parse(msg.sources);
+          if (sources.length) {
+            const sourcesContainer = document.createElement("div");
+            sourcesContainer.className = "sources";
+            renderSources(sourcesContainer, sources);
+            el.appendChild(sourcesContainer);
+          }
+        } catch {}
+      }
+
+      const contentEl = document.createElement("div");
+      contentEl.className = "admin-msg-content";
+      if (role === "assistant") {
+        contentEl.innerHTML = marked.parse(msg.content || "");
+      } else {
+        contentEl.textContent = msg.content || "";
+      }
+      el.appendChild(contentEl);
+
+      const footerEl = document.createElement("div");
+      footerEl.className = "admin-msg-footer";
+      footerEl.innerHTML = `<span class="admin-msg-time">${time}</span>`;
+      if (role === "assistant" && (msg.input_tokens || msg.output_tokens)) {
+        footerEl.innerHTML += `
+          <span class="token-usage-badge">IN <span>${msg.input_tokens || 0}</span></span>
+          <span class="token-usage-badge">OUT <span>${msg.output_tokens || 0}</span></span>`;
+      }
+      el.appendChild(footerEl);
+
+      convMessages.appendChild(el);
+    }
+  } catch {
+    convMessages.innerHTML = `<div class="conv-empty">불러오기 실패</div>`;
+  }
+}
+
+function renderSources(container, sources) {
+  if (!sources.length) return;
+
+  const toggle = document.createElement("button");
+  toggle.className = "sources-toggle";
+  toggle.innerHTML = `<span class="arrow">&#9654;</span> 참고 문서 ${sources.length}건`;
+
+  const list = document.createElement("div");
+  list.className = "sources-list";
+
+  sources.forEach((s) => {
+    const item = document.createElement("div");
+    item.className = "source-item";
+    let html = `<div class="source-header">${escapeHtml(s.source)}</div>`;
+    html += `<span class="source-score">유사도: ${(s.score * 100).toFixed(1)}%</span>`;
+    if (s.url) {
+      html += ` <a href="${escapeAttr(s.url)}" target="_blank" rel="noopener">원문 보기</a>`;
+    }
+    html += `<div class="source-content">${escapeHtml(s.content)}</div>`;
+    item.innerHTML = html;
+    list.appendChild(item);
+  });
+
+  toggle.addEventListener("click", () => {
+    toggle.classList.toggle("open");
+    list.classList.toggle("open");
+  });
+
+  container.appendChild(toggle);
+  container.appendChild(list);
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function escapeAttr(str) {
+  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+initTheme();
+checkAdmin().then((ok) => {
+  if (ok) loadUsers();
+});
