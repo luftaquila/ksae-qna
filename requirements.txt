@@ -14,3 +14,4 @@ authlib
 httpx
 PyJWT
 itsdangerous
+anthropic

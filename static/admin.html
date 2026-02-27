@@ -36,6 +36,7 @@
     <div class="admin-tabs">
       <button class="admin-tab active" data-tab="users">사용자 관리</button>
       <button class="admin-tab" data-tab="conversations">대화 기록</button>
+      <button class="admin-tab" data-tab="models">모델 관리</button>
     </div>
 
     <div class="admin-content">
@@ -56,6 +57,12 @@
           </thead>
           <tbody id="users-tbody"></tbody>
         </table>
+      </div>
+
+      <!-- Models Tab -->
+      <div id="tab-models" class="tab-panel">
+        <p class="models-description">모델 활성화/비활성화를 관리합니다. 비활성화된 모델은 사용자에게 표시되지 않습니다.</p>
+        <div id="models-grid" class="models-grid"></div>
       </div>
 
       <!-- Conversations Tab -->

@@ -16,6 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from src.auth import (
     add_credits,
     add_message,
+    refund_credit,
     admin_get_messages,
     admin_set_credits,
     clear_auth_cookie,
@@ -39,7 +40,7 @@ from src.auth import (
     set_auth_cookie,
     update_session_title,
 )
-from src.chat import init_resources, search_and_stream
+from src.chat import MODEL_CONFIG, get_all_models_admin, get_effective_credits, get_models, init_model_settings, init_resources, is_model_available, search_and_stream, set_model_admin_settings
 
 load_dotenv()
 
@@ -50,6 +51,7 @@ async def lifespan(app: FastAPI):
     init_oauth()
     init_admin_emails()
     init_resources()
+    init_model_settings()
     yield
 
 
@@ -77,6 +79,7 @@ class ChatRequest(BaseModel):
     session_id: int | None = None
     collections: list[str] | None = None
     category: str | None = None
+    model: str = "gemini-3-flash"
 
 
 class SessionPatch(BaseModel):
@@ -90,6 +93,11 @@ class TopupRequest(BaseModel):
 class AdminCreditRequest(BaseModel):
     credits: int
     memo: str = "관리자 조정"
+
+
+class ModelToggleRequest(BaseModel):
+    enabled: bool
+    credits: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -231,16 +239,32 @@ async def sessions_update(session_id: int, body: SessionPatch, request: Request)
 # ---------------------------------------------------------------------------
 # Chat (with auth + credit check + session persistence)
 # ---------------------------------------------------------------------------
+@app.get("/api/models")
+async def models_list():
+    return {"models": get_models()}
+
+
 @app.post("/api/chat")
 async def chat(request: Request, req: ChatRequest):
     user = get_current_user(request)
     if not user:
         return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
 
-    if not deduct_credit(user["id"]):
+    # Validate model
+    model_config = MODEL_CONFIG.get(req.model)
+    if not model_config:
+        return JSONResponse({"error": "지원하지 않는 모델입니다"}, status_code=400)
+
+    if not is_model_available(req.model):
+        return JSONResponse({"error": f"{model_config['label']} 모델을 사용할 수 없습니다. API 키가 설정되지 않았습니다."}, status_code=503)
+
+    credits_needed = get_effective_credits(req.model)
+    model_label = model_config["label"]
+
+    if not deduct_credit(user["id"], credits_needed, f"질문 ({model_label})"):
         return JSONResponse({"error": "크레딧이 부족합니다"}, status_code=402)
 
-    remaining = user["credits"] - 1
+    remaining = user["credits"] - credits_needed
 
     # Resolve or create session
     session_id = req.session_id
@@ -274,9 +298,15 @@ async def chat(request: Request, req: ChatRequest):
         input_tokens = None
         output_tokens = None
         thinking_tokens = None
+        has_error = False
 
-        async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections, category=req.category):
-            yield event
+        async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections, category=req.category, model=req.model):
+            # Forward error events as token events so the client displays them
+            if event.startswith("event: error"):
+                has_error = True
+                yield event.replace("event: error", "event: token", 1)
+            else:
+                yield event
 
             # Collect data for persistence
             if event.startswith("event: sources"):
@@ -301,8 +331,12 @@ async def chat(request: Request, req: ChatRequest):
                 except Exception:
                     pass
 
+        # Refund credits on LLM error
+        if has_error:
+            refund_credit(user["id"], credits_needed, f"오류 환불 ({model_label})")
+
         # Persist assistant message
-        add_message(session_id, "assistant", full_text, sources_json, input_tokens, output_tokens, thinking_tokens)
+        add_message(session_id, "assistant", full_text, sources_json, input_tokens, output_tokens, thinking_tokens, model=req.model)
 
         # Send session_id to client
         yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
@@ -378,6 +412,25 @@ async def admin_session_messages(session_id: int, request: Request):
     if not is_admin(request):
         return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
     return {"messages": admin_get_messages(session_id)}
+
+
+@app.get("/api/admin/models")
+async def admin_models_list(request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    return {"models": get_all_models_admin()}
+
+
+@app.patch("/api/admin/models/{model_key}")
+async def admin_toggle_model(model_key: str, body: ModelToggleRequest, request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    if model_key not in MODEL_CONFIG:
+        return JSONResponse({"error": "존재하지 않는 모델입니다"}, status_code=404)
+    if body.credits is not None and body.credits < 0:
+        return JSONResponse({"error": "크레딧은 0 이상이어야 합니다"}, status_code=400)
+    set_model_admin_settings(model_key, body.enabled, body.credits)
+    return {"ok": True, "model_key": model_key, "enabled": body.enabled, "credits": get_effective_credits(model_key)}
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")

@@ -715,6 +715,7 @@ header h1 {
   gap: 8px;
 }
 
+.model-select,
 .category-select {
   padding: 4px 8px;
   border: 1.5px solid var(--color-primary);
@@ -731,11 +732,13 @@ header h1 {
   appearance: none;
 }
 
+.model-select option,
 .category-select option {
   background: var(--bg-container);
   color: var(--text-primary);
 }
 
+.model-select:hover,
 .category-select:hover {
   background-color: color-mix(in srgb, var(--color-primary) 15%, transparent);
 }
@@ -842,9 +845,33 @@ header h1 {
   margin-top: 4px;
 }
 
+.welcome-models {
+  max-width: 520px;
+  width: 100%;
+}
+
+.welcome-models-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.welcome-models-grid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.welcome-models-row {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+
 .welcome-model {
   display: inline-block;
-  margin-top: 10px;
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--color-primary);

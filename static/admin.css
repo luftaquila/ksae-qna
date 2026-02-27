@@ -490,6 +490,176 @@
 .conv-messages::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
 
 /* ==========================================================================
+   Models Tab
+   ========================================================================== */
+.models-description {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+
+.models-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.model-card {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--bg-input);
+  transition: opacity 0.2s;
+}
+
+.model-card.unavailable {
+  opacity: 0.5;
+}
+
+.model-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.model-card-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.model-card-provider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.model-provider-status {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 8px;
+}
+
+.model-provider-status.connected {
+  color: #27ae60;
+  background: color-mix(in srgb, #27ae60 12%, transparent);
+}
+
+.model-provider-status.disconnected {
+  color: #e74c3c;
+  background: color-mix(in srgb, #e74c3c 12%, transparent);
+}
+
+.model-card-credits-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.model-credits-label {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.model-credits-input {
+  width: 60px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-input);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  text-align: center;
+}
+
+.model-credits-input:focus {
+  border-color: var(--color-primary);
+}
+
+.model-credits-reset {
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.model-credits-reset:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.model-card-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toggle-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--border-color);
+  border-radius: 22px;
+  transition: background 0.2s;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 3px;
+  bottom: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--color-primary);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ==========================================================================
    Responsive
    ========================================================================== */
 @media (max-width: 768px) {

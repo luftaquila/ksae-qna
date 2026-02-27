@@ -12,6 +12,7 @@ const sidebarOverlay = document.getElementById("sidebar-overlay");
 
 let currentUser = null;
 let currentSessionId = null;
+let availableModels = [];
 
 // ---------------------------------------------------------------------------
 // Mobile sidebar
@@ -333,7 +334,8 @@ form.addEventListener("submit", async (e) => {
   try {
     const collections = [...form.querySelectorAll('input[name="collections"]:checked')].map((el) => el.value);
     const category = document.getElementById("category-select").value || null;
-    const body = { query, collections, category };
+    const model = document.getElementById("model-select").value;
+    const body = { query, collections, category, model };
     if (currentSessionId) body.session_id = currentSessionId;
 
     const res = await fetch("/api/chat", {
@@ -353,6 +355,13 @@ form.addEventListener("submit", async (e) => {
     if (res.status === 402) {
       answerEl.textContent = "토큰이 부족합니다. 구매 후 다시 시도해주세요.";
       updateCreditDisplay(0);
+      setLoading(false);
+      return;
+    }
+
+    if (res.status === 503) {
+      const data = await res.json();
+      answerEl.textContent = data.error || "모델을 사용할 수 없습니다.";
       setLoading(false);
       return;
     }
@@ -513,8 +522,50 @@ function formatLocal(utcStr) {
 }
 
 // ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+async function loadModels() {
+  try {
+    const res = await fetch("/api/models");
+    const data = await res.json();
+    availableModels = data.models || [];
+  } catch {
+    availableModels = [];
+  }
+  renderModelSelect();
+}
+
+function renderModelSelect() {
+  const select = document.getElementById("model-select");
+  const prev = select.value;
+  select.innerHTML = "";
+  for (const m of availableModels) {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = `${m.label} (${m.credits})`;
+    select.appendChild(opt);
+  }
+  // Restore previous selection if still available
+  if (prev && availableModels.some((m) => m.id === prev)) {
+    select.value = prev;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Welcome screen
 // ---------------------------------------------------------------------------
+function buildWelcomeModelRows() {
+  if (!availableModels.length) return "";
+  // Group models into rows of 2
+  const rows = [];
+  for (let i = 0; i < availableModels.length; i += 2) {
+    const pair = availableModels.slice(i, i + 2);
+    const spans = pair.map((m) => `<span class="welcome-model">${escapeHtml(m.label)} (${m.credits})</span>`).join("");
+    rows.push(`<div class="welcome-models-row">${spans}</div>`);
+  }
+  return rows.join("");
+}
+
 function showWelcome() {
   // Don't overwrite if there are actual messages displayed
   if (chat.querySelector(".msg")) return;
@@ -531,12 +582,17 @@ function showWelcome() {
       <div>
         <div class="welcome-title">PitBot</div>
         <p class="welcome-subtitle">자작자동차 규정 및 Q&A 챗봇</p>
-        <span class="welcome-model">Gemini 3 Flash</span>
+      </div>
+      <div class="welcome-models">
+        <div class="welcome-models-title">모델 선택 (소모 토큰)</div>
+        <div class="welcome-models-grid">
+          ${buildWelcomeModelRows()}
+        </div>
       </div>
       <div class="welcome-items">
         <div class="welcome-item">
           <span class="welcome-icon">&#9889;</span>
-          <span>질문 1회당 토큰 1개가 차감됩니다</span>
+          <span>질문 1회당 선택한 모델에 따라 토큰이 차감됩니다</span>
         </div>
         <div class="welcome-item">
           <span class="welcome-icon">&#128218;</span>
@@ -560,5 +616,5 @@ function showWelcome() {
 // Init
 // ---------------------------------------------------------------------------
 initTheme();
-showWelcome();
+loadModels().then(() => showWelcome());
 checkAuth();

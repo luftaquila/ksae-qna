@@ -6,6 +6,7 @@ const convSessionList = document.getElementById("conv-session-list");
 const convMessages = document.getElementById("conv-messages");
 
 let allUsers = [];
+let allModels = [];
 let currentConvSessionId = null;
 
 // ---------------------------------------------------------------------------
@@ -356,9 +357,11 @@ async function loadMessages(sessionId) {
         const msgIn = msg.input_tokens || 0;
         const msgOut = msg.output_tokens || 0;
         const msgThink = msg.thinking_tokens || 0;
-        const msgCost = estimateCost(msgIn, msgOut, msgThink);
+        const msgModel = msg.model || null;
+        const msgCost = estimateCost(msgIn, msgOut, msgThink, msgModel);
+        const modelLabel = msgModel ? ` [${msgModel}]` : "";
         footerEl.innerHTML += `
-          <span class="api-usage-chip small">IN ${msgIn.toLocaleString()} / OUT ${msgOut.toLocaleString()} / THK ${msgThink.toLocaleString()}</span>
+          <span class="api-usage-chip small">IN ${msgIn.toLocaleString()} / OUT ${msgOut.toLocaleString()} / THK ${msgThink.toLocaleString()}${modelLabel}</span>
           <span class="api-cost-chip small">${msgCost}</span>`;
       }
       el.appendChild(footerEl);
@@ -403,12 +406,151 @@ function renderSources(container, sources) {
 }
 
 // ---------------------------------------------------------------------------
+// Models tab
+// ---------------------------------------------------------------------------
+async function loadModels() {
+  try {
+    const res = await fetch("/api/admin/models");
+    const data = await res.json();
+    allModels = data.models || [];
+  } catch {
+    allModels = [];
+  }
+  renderModels();
+}
+
+function renderModels() {
+  const grid = document.getElementById("models-grid");
+  if (!grid) return;
+
+  grid.innerHTML = allModels.map((m) => {
+    const providerLabel = m.provider === "gemini" ? "Google Gemini" : "Anthropic";
+    const providerStatus = m.provider_available
+      ? `<span class="model-provider-status connected">연결됨</span>`
+      : `<span class="model-provider-status disconnected">미연결</span>`;
+    const disabled = !m.provider_available ? "disabled" : "";
+    const checked = m.admin_enabled ? "checked" : "";
+    const isCustom = m.credits !== m.default_credits;
+    const resetBtn = isCustom
+      ? `<button class="model-credits-reset" onclick="resetModelCredits('${m.id}')" title="기본값(${m.default_credits})으로 초기화">초기화</button>`
+      : "";
+    return `<div class="model-card${m.available ? "" : " unavailable"}">
+      <div class="model-card-header">
+        <span class="model-card-label">${escapeHtml(m.label)}</span>
+      </div>
+      <div class="model-card-provider">
+        <span class="model-card-provider-name">${providerLabel}</span>
+        ${providerStatus}
+      </div>
+      <div class="model-card-credits-row">
+        <label class="model-credits-label">차감 크레딧</label>
+        <input type="number" class="model-credits-input" min="0" value="${m.credits}"
+          data-model="${m.id}" onchange="updateModelCredits('${m.id}', this.value)">
+        ${resetBtn}
+      </div>
+      <div class="model-card-toggle">
+        <label class="toggle-switch">
+          <input type="checkbox" ${checked} ${disabled} onchange="toggleModel('${m.id}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">${m.admin_enabled ? "활성" : "비활성"}</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+window.toggleModel = async function (modelKey, enabled) {
+  const m = allModels.find((m) => m.id === modelKey);
+  const credits = m && m.credits !== m.default_credits ? m.credits : null;
+  try {
+    const res = await fetch(`/api/admin/models/${modelKey}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled, credits }),
+    });
+    if (res.ok) {
+      if (m) {
+        m.admin_enabled = enabled;
+        m.available = m.provider_available && enabled;
+      }
+      renderModels();
+    } else {
+      const err = await res.json();
+      alert(err.error || "변경에 실패했습니다");
+      loadModels();
+    }
+  } catch {
+    alert("변경에 실패했습니다");
+    loadModels();
+  }
+};
+
+window.updateModelCredits = async function (modelKey, value) {
+  const credits = parseInt(value, 10);
+  if (isNaN(credits) || credits < 0) return;
+  const m = allModels.find((m) => m.id === modelKey);
+  if (!m) return;
+  try {
+    const res = await fetch(`/api/admin/models/${modelKey}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: m.admin_enabled, credits }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      m.credits = data.credits;
+      renderModels();
+    } else {
+      const err = await res.json();
+      alert(err.error || "변경에 실패했습니다");
+      loadModels();
+    }
+  } catch {
+    alert("변경에 실패했습니다");
+    loadModels();
+  }
+};
+
+window.resetModelCredits = async function (modelKey) {
+  const m = allModels.find((m) => m.id === modelKey);
+  if (!m) return;
+  try {
+    const res = await fetch(`/api/admin/models/${modelKey}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: m.admin_enabled, credits: null }),
+    });
+    if (res.ok) {
+      m.credits = m.default_credits;
+      renderModels();
+    } else {
+      const err = await res.json();
+      alert(err.error || "변경에 실패했습니다");
+      loadModels();
+    }
+  } catch {
+    alert("변경에 실패했습니다");
+    loadModels();
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-// Gemini 3 Flash pricing: $0.50/1M input, $3.00/1M output
-// Gemini 3 Flash: $0.50/1M input, $3.00/1M output, $3.00/1M thinking
-function estimateCost(inputTokens, outputTokens, thinkingTokens = 0) {
-  const cost = (inputTokens * 0.5 + outputTokens * 3.0 + thinkingTokens * 3.0) / 1_000_000;
+// Per-model pricing (per 1M tokens)
+const MODEL_PRICING = {
+  "gemini-3-flash":    { input: 0.50, output: 3.00,  thinking: 3.00 },
+  "gemini-3-pro":      { input: 2.50, output: 15.00, thinking: 15.00 },
+  "claude-sonnet-4.6": { input: 3.00, output: 15.00, thinking: 0 },
+  "claude-opus-4.6":   { input: 5.00, output: 25.00, thinking: 25.00 },
+};
+
+// Default pricing (Gemini Flash) for messages without model info
+const DEFAULT_PRICING = MODEL_PRICING["gemini-3-flash"];
+
+function estimateCost(inputTokens, outputTokens, thinkingTokens = 0, model = null) {
+  const p = (model && MODEL_PRICING[model]) || DEFAULT_PRICING;
+  const cost = (inputTokens * p.input + outputTokens * p.output + thinkingTokens * p.thinking) / 1_000_000;
   if (cost < 0.01) return "$" + cost.toFixed(4);
   return "$" + cost.toFixed(2);
 }
@@ -439,5 +581,8 @@ function escapeAttr(str) {
 // ---------------------------------------------------------------------------
 initTheme();
 checkAdmin().then((ok) => {
-  if (ok) loadUsers();
+  if (ok) {
+    loadUsers();
+    loadModels();
+  }
 });

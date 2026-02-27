@@ -1,5 +1,5 @@
 """
-RAG search + Gemini LLM streaming for KSAE Q&A chatbot.
+RAG search + multi-model LLM streaming for KSAE Q&A chatbot.
 """
 
 import asyncio
@@ -7,15 +7,22 @@ import json
 import os
 from collections.abc import AsyncIterator
 
+import anthropic
 from google import genai
 from google.genai import types
 from qdrant_client import QdrantClient, models
 from sentence_transformers import SentenceTransformer
 
+from src.auth import get_model_settings_map, set_model_settings
+
 # Globals initialized once at server startup
 _model: SentenceTransformer | None = None
 _qdrant: QdrantClient | None = None
 _gemini: genai.Client | None = None
+_anthropic: anthropic.AsyncAnthropic | None = None
+
+_model_enabled: dict[str, bool] = {}
+_model_credits: dict[str, int | None] = {}
 
 EMBEDDING_MODEL = "BAAI/bge-m3"
 COLLECTIONS = {
@@ -23,6 +30,41 @@ COLLECTIONS = {
     "rules": "ksae-formula-rules",
 }
 _STREAM_DONE = object()
+
+MODEL_CONFIG = {
+    "gemini-3-flash": {
+        "provider": "gemini",
+        "model_id": "gemini-3-flash-preview",
+        "label": "Gemini 3 Flash",
+        "credits": 1,
+        "thinking_level": "high",
+        "pricing": {"input": 0.50, "output": 3.00, "thinking": 3.00},
+    },
+    "gemini-3-pro": {
+        "provider": "gemini",
+        "model_id": "gemini-3-pro-preview",
+        "label": "Gemini 3 Pro",
+        "credits": 4,
+        "thinking_level": "high",
+        "pricing": {"input": 2.50, "output": 15.00, "thinking": 15.00},
+    },
+    "claude-sonnet-4.6": {
+        "provider": "anthropic",
+        "model_id": "claude-sonnet-4-6-20250514",
+        "label": "Claude Sonnet 4.6",
+        "credits": 5,
+        "thinking_level": None,
+        "pricing": {"input": 3.00, "output": 15.00, "thinking": 0},
+    },
+    "claude-opus-4.6": {
+        "provider": "anthropic",
+        "model_id": "claude-opus-4-6-20250514",
+        "label": "Claude Opus 4.6",
+        "credits": 10,
+        "thinking_level": "high",
+        "pricing": {"input": 5.00, "output": 25.00, "thinking": 25.00},
+    },
+}
 
 SYSTEM_PROMPT = """\
 당신은 KSAE(한국자동차공학회) 대학생 자작자동차대회 Q&A 전문 어시스턴트입니다.
@@ -42,8 +84,8 @@ SYSTEM_PROMPT = """\
 
 
 def init_resources():
-    """Initialize BGE-M3 model, Qdrant client, and Gemini client once."""
-    global _model, _qdrant, _gemini
+    """Initialize BGE-M3 model, Qdrant client, Gemini client, and optionally Anthropic client."""
+    global _model, _qdrant, _gemini, _anthropic
 
     print("Loading BGE-M3 model...")
     _model = SentenceTransformer(EMBEDDING_MODEL)
@@ -60,6 +102,95 @@ def init_resources():
         raise RuntimeError("GOOGLE_API_KEY environment variable is required")
     _gemini = genai.Client(api_key=api_key)
     print("Gemini client initialized.")
+
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        _anthropic = anthropic.AsyncAnthropic(api_key=anthropic_key)
+        print("Anthropic client initialized.")
+    else:
+        print("WARNING: ANTHROPIC_API_KEY not set — Claude models will be unavailable.")
+
+
+def init_model_settings() -> None:
+    """Load admin model settings from DB into in-memory cache."""
+    settings = get_model_settings_map()
+    for key, val in settings.items():
+        _model_enabled[key] = val["enabled"]
+        _model_credits[key] = val["credits"]
+
+
+def set_model_admin_settings(model_key: str, enabled: bool, credits: int | None = None) -> None:
+    """Update both DB and in-memory cache for enabled + credits."""
+    set_model_settings(model_key, enabled, credits)
+    _model_enabled[model_key] = enabled
+    _model_credits[model_key] = credits
+
+
+def get_effective_credits(model_key: str) -> int:
+    """Return admin-overridden credits or default from MODEL_CONFIG."""
+    custom = _model_credits.get(model_key)
+    if custom is not None:
+        return custom
+    return MODEL_CONFIG[model_key]["credits"]
+
+
+def is_model_available(model: str) -> bool:
+    """Check if a model's provider client is initialized and admin-enabled."""
+    cfg = MODEL_CONFIG.get(model)
+    if not cfg:
+        return False
+    if not _model_enabled.get(model, True):
+        return False
+    if cfg["provider"] == "gemini":
+        return _gemini is not None
+    if cfg["provider"] == "anthropic":
+        return _anthropic is not None
+    return False
+
+
+def get_models() -> list[dict]:
+    """Return list of available models (provider initialized + admin enabled)."""
+    result = []
+    for model_key, cfg in MODEL_CONFIG.items():
+        if not _model_enabled.get(model_key, True):
+            continue
+        if cfg["provider"] == "gemini" and _gemini is None:
+            continue
+        if cfg["provider"] == "anthropic" and _anthropic is None:
+            continue
+        result.append({
+            "id": model_key,
+            "label": cfg["label"],
+            "credits": get_effective_credits(model_key),
+            "pricing": cfg["pricing"],
+        })
+    return result
+
+
+def get_all_models_admin() -> list[dict]:
+    """Return all models with provider_available, admin_enabled, and available status."""
+    result = []
+    for model_key, cfg in MODEL_CONFIG.items():
+        if cfg["provider"] == "gemini":
+            provider_available = _gemini is not None
+        elif cfg["provider"] == "anthropic":
+            provider_available = _anthropic is not None
+        else:
+            provider_available = False
+
+        admin_enabled = _model_enabled.get(model_key, True)
+
+        result.append({
+            "id": model_key,
+            "label": cfg["label"],
+            "default_credits": cfg["credits"],
+            "credits": get_effective_credits(model_key),
+            "provider": cfg["provider"],
+            "provider_available": provider_available,
+            "admin_enabled": admin_enabled,
+            "available": provider_available and admin_enabled,
+        })
+    return result
 
 
 def search(
@@ -140,55 +271,32 @@ def _build_prompt(query: str, sources: list[dict]) -> str:
     return f"다음은 검색된 참고 문서입니다:\n\n{context}\n\n---\n\n사용자 질문: {query}"
 
 
-async def search_and_stream(
-    query: str,
-    limit: int = 5,
-    min_score: float = 0.0,
-    history: list[dict] | None = None,
-    collections: list[str] | None = None,
-    category: str | None = None,
+async def _stream_gemini(
+    contents: list,
+    model_config: dict,
 ) -> AsyncIterator[str]:
-    """
-    Async generator that yields SSE-formatted events:
-      - event: sources  (JSON array of search results)
-      - event: token    (single text token from Gemini)
-      - event: done     (stream finished)
-
-    history: list of {"role": "user"|"assistant", "content": str} for multi-turn context.
-    collections: list of collection keys ("qna", "rules") to search.
-    """
-    # Step 1: Search
-    sources = search(query, limit, min_score, collections, category)
-
-    # Yield sources event
-    yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
-
-    # Step 2: Build contents for Gemini
-    user_prompt = _build_prompt(query, sources)
-
-    contents = []
-    for msg in history or []:
-        role = "model" if msg["role"] == "assistant" else "user"
-        contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
-    contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
-
+    """Stream from Gemini and yield SSE events (token / usage)."""
     input_tokens = 0
     output_tokens = 0
     thinking_tokens = 0
 
     try:
+        config_kwargs: dict = {
+            "system_instruction": SYSTEM_PROMPT,
+            "temperature": 0.3,
+            "max_output_tokens": 4096,
+        }
+        if model_config["thinking_level"]:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_level=model_config["thinking_level"]
+            )
+
         response = _gemini.models.generate_content_stream(
-            model="gemini-3-flash-preview",
+            model=model_config["model_id"],
             contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.3,
-                max_output_tokens=4096,
-                thinking_config=types.ThinkingConfig(thinking_level="high"),
-            ),
+            config=types.GenerateContentConfig(**config_kwargs),
         )
 
-        # Iterate sync Gemini stream via thread pool to avoid blocking the event loop
         loop = asyncio.get_event_loop()
         it = iter(response)
         while True:
@@ -198,7 +306,6 @@ async def search_and_stream(
             if chunk.text:
                 data = json.dumps(chunk.text, ensure_ascii=False)
                 yield f"event: token\ndata: {data}\n\n"
-            # Capture usage metadata from the last chunk
             if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
                 um = chunk.usage_metadata
                 if hasattr(um, "prompt_token_count") and um.prompt_token_count is not None:
@@ -209,9 +316,123 @@ async def search_and_stream(
                     thinking_tokens = um.thoughts_token_count
     except Exception as e:
         error_msg = json.dumps(f"LLM 호출 오류: {e}", ensure_ascii=False)
-        yield f"event: token\ndata: {error_msg}\n\n"
+        yield f"event: error\ndata: {error_msg}\n\n"
 
-    # Send usage metadata before done
     usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens, "thinking_tokens": thinking_tokens})
     yield f"event: usage\ndata: {usage_data}\n\n"
+
+
+async def _stream_anthropic(
+    model_config: dict,
+    query: str,
+    sources: list[dict],
+    history: list[dict] | None = None,
+) -> AsyncIterator[str]:
+    """Stream from Anthropic and yield SSE events (token / usage)."""
+    user_prompt = _build_prompt(query, sources)
+
+    # Build messages in Anthropic format
+    messages = []
+    for msg in history or []:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_prompt})
+
+    input_tokens = 0
+    output_tokens = 0
+    thinking_tokens = 0
+
+    try:
+        kwargs: dict = {
+            "model": model_config["model_id"],
+            "max_tokens": 4096,
+            "system": SYSTEM_PROMPT,
+            "messages": messages,
+        }
+
+        if model_config["thinking_level"]:
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": 8192}
+            kwargs["temperature"] = 1  # required for extended thinking
+
+        async with _anthropic.messages.stream(**kwargs) as stream:
+            async for event in stream:
+                if event.type == "content_block_delta":
+                    if hasattr(event.delta, "text"):
+                        data = json.dumps(event.delta.text, ensure_ascii=False)
+                        yield f"event: token\ndata: {data}\n\n"
+
+            # Get final message for usage
+            response = await stream.get_final_message()
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+
+            # Count thinking tokens from thinking content blocks
+            for block in response.content:
+                if block.type == "thinking":
+                    # Anthropic doesn't provide thinking token counts directly in content blocks;
+                    # but the usage object may have it
+                    pass
+
+            # Check for thinking tokens in usage (Anthropic may include cache_creation_input_tokens etc.)
+            if hasattr(response.usage, "cache_read_input_tokens"):
+                pass  # just ignore cache tokens for now
+
+    except Exception as e:
+        error_msg = json.dumps(f"LLM 호출 오류: {e}", ensure_ascii=False)
+        yield f"event: error\ndata: {error_msg}\n\n"
+
+    usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens, "thinking_tokens": thinking_tokens})
+    yield f"event: usage\ndata: {usage_data}\n\n"
+
+
+async def search_and_stream(
+    query: str,
+    limit: int = 5,
+    min_score: float = 0.0,
+    history: list[dict] | None = None,
+    collections: list[str] | None = None,
+    category: str | None = None,
+    model: str = "gemini-3-flash",
+) -> AsyncIterator[str]:
+    """
+    Async generator that yields SSE-formatted events:
+      - event: sources  (JSON array of search results)
+      - event: token    (single text token from LLM)
+      - event: usage    (token usage metadata)
+      - event: done     (stream finished)
+
+    history: list of {"role": "user"|"assistant", "content": str} for multi-turn context.
+    collections: list of collection keys ("qna", "rules") to search.
+    model: model key from MODEL_CONFIG.
+    """
+    model_config = MODEL_CONFIG[model]
+
+    # Step 1: Search
+    sources = search(query, limit, min_score, collections, category)
+
+    # Yield sources event
+    yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
+
+    # Step 2: Stream from the selected provider
+    if model_config["provider"] == "gemini":
+        # Build Gemini contents
+        user_prompt = _build_prompt(query, sources)
+        contents = []
+        for msg in history or []:
+            role = "model" if msg["role"] == "assistant" else "user"
+            contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
+        contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
+
+        async for event in _stream_gemini(contents, model_config):
+            yield event
+
+    elif model_config["provider"] == "anthropic":
+        if _anthropic is None:
+            error_msg = json.dumps("Anthropic API 키가 설정되지 않았습니다. Claude 모델을 사용할 수 없습니다.", ensure_ascii=False)
+            yield f"event: error\ndata: {error_msg}\n\n"
+            usage_data = json.dumps({"input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0})
+            yield f"event: usage\ndata: {usage_data}\n\n"
+        else:
+            async for event in _stream_anthropic(model_config, query, sources, history):
+                yield event
+
     yield "event: done\ndata: {}\n\n"

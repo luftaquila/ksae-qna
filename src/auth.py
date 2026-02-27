@@ -131,12 +131,62 @@ def init_db() -> None:
         except sqlite3.OperationalError:
             pass  # column already exists
 
+    # Migrate: add model column to messages
+    try:
+        conn.execute("ALTER TABLE messages ADD COLUMN model TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
     # Migrate: add soft-delete column to sessions
     try:
         conn.execute("ALTER TABLE sessions ADD COLUMN deleted_at TEXT")
     except sqlite3.OperationalError:
         pass  # column already exists
 
+    # Model settings table
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS model_settings (
+            model_key   TEXT PRIMARY KEY,
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            credits     INTEGER,
+            updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+
+    # Migrate: add credits column to model_settings
+    try:
+        conn.execute("ALTER TABLE model_settings ADD COLUMN credits INTEGER")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
+    conn.commit()
+    conn.close()
+
+
+def get_model_settings_map() -> dict[str, dict]:
+    """Return {model_key: {"enabled": bool, "credits": int|None}} for all rows."""
+    conn = _get_conn()
+    rows = conn.execute("SELECT model_key, enabled, credits FROM model_settings").fetchall()
+    conn.close()
+    return {r["model_key"]: {"enabled": bool(r["enabled"]), "credits": r["credits"]} for r in rows}
+
+
+def set_model_settings(model_key: str, enabled: bool, credits: int | None = None) -> None:
+    """UPSERT model enabled state and optional custom credits."""
+    conn = _get_conn()
+    conn.execute(
+        """
+        INSERT INTO model_settings (model_key, enabled, credits, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(model_key) DO UPDATE SET
+            enabled = excluded.enabled,
+            credits = excluded.credits,
+            updated_at = excluded.updated_at
+        """,
+        (model_key, int(enabled), credits),
+    )
     conn.commit()
     conn.close()
 
@@ -183,22 +233,37 @@ def get_user_by_id(user_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def deduct_credit(user_id: int) -> bool:
-    """Atomically deduct 1 credit. Returns True if successful."""
+def deduct_credit(user_id: int, amount: int = 1, memo: str = "질문") -> bool:
+    """Atomically deduct *amount* credits. Returns True if successful."""
     conn = _get_conn()
     cur = conn.execute(
-        "UPDATE users SET credits = credits - 1, updated_at = datetime('now') WHERE id = ? AND credits > 0",
-        (user_id,),
+        "UPDATE users SET credits = credits - ?, updated_at = datetime('now') WHERE id = ? AND credits >= ?",
+        (amount, user_id, amount),
     )
     if cur.rowcount > 0:
         conn.execute(
             "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
-            (user_id, -1, "usage", "질문"),
+            (user_id, -amount, "usage", memo),
         )
     conn.commit()
     success = cur.rowcount > 0
     conn.close()
     return success
+
+
+def refund_credit(user_id: int, amount: int = 1, memo: str = "환불") -> None:
+    """Refund credits back to a user (e.g. on LLM error)."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE users SET credits = credits + ?, updated_at = datetime('now') WHERE id = ?",
+        (amount, user_id),
+    )
+    conn.execute(
+        "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
+        (user_id, amount, "refund", memo),
+    )
+    conn.commit()
+    conn.close()
 
 
 def add_credits(user_id: int, amount: int) -> int | None:
@@ -347,11 +412,12 @@ def add_message(
     input_tokens: int | None = None,
     output_tokens: int | None = None,
     thinking_tokens: int | None = None,
+    model: str | None = None,
 ) -> dict:
     conn = _get_conn()
     cur = conn.execute(
-        "INSERT INTO messages (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens),
+        "INSERT INTO messages (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens, model),
     )
     conn.execute(
         "UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", (session_id,)
