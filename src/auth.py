@@ -592,6 +592,10 @@ def admin_set_credits(user_id: int, credits: int, memo: str = "관리자 조정"
     old_credits = row["credits"]
     delta = credits - old_credits
 
+    if delta == 0:
+        conn.close()
+        return credits
+
     conn.execute(
         "UPDATE users SET credits = ?, updated_at = datetime('now') WHERE id = ?",
         (credits, user_id),

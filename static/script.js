@@ -545,11 +545,16 @@ function renderModelSelect() {
     const opt = document.createElement("option");
     opt.value = m.id;
     opt.textContent = `${m.label} (${m.credits})`;
+    if (!m.available) opt.disabled = true;
     select.appendChild(opt);
   }
-  // Restore previous selection if still available
-  if (prev && availableModels.some((m) => m.id === prev)) {
+  // Restore previous selection if still available and enabled
+  if (prev && availableModels.some((m) => m.id === prev && m.available)) {
     select.value = prev;
+  } else {
+    // Select first available model
+    const first = availableModels.find((m) => m.available);
+    if (first) select.value = first.id;
   }
 }
 
@@ -562,7 +567,10 @@ function buildWelcomeModelRows() {
   const rows = [];
   for (let i = 0; i < availableModels.length; i += 2) {
     const pair = availableModels.slice(i, i + 2);
-    const spans = pair.map((m) => `<span class="welcome-model">${escapeHtml(m.label)} (${m.credits})</span>`).join("");
+    const spans = pair.map((m) => {
+      const cls = m.available ? "welcome-model" : "welcome-model disabled";
+      return `<span class="${cls}">${escapeHtml(m.label)} (${m.credits})</span>`;
+    }).join("");
     rows.push(`<div class="welcome-models-row">${spans}</div>`);
   }
   return rows.join("");
@@ -600,9 +608,9 @@ function showWelcome() {
           <span class="welcome-icon">&#128218;</span>
           <span>입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.
             <ul class="welcome-chip-list">
-              <li><b>카테고리</b> &mdash; Q&A 카테고리 필터</li>
-              <li><b>Q&A</b> &mdash; QnA 게시판 데이터</li>
               <li><b>규정</b> &mdash; 대회 규정집 (2026 Formula)</li>
+              <li><b>Q&A</b> &mdash; QnA 게시판 데이터</li>
+              <li><b>카테고리</b> &mdash; Q&A 카테고리 필터</li>
             </ul>
           </span>
         </div>
@@ -613,6 +621,20 @@ function showWelcome() {
     </div>
   `;
 }
+
+// ---------------------------------------------------------------------------
+// QnA chip ↔ category select sync
+// ---------------------------------------------------------------------------
+const qnaCheckbox = document.querySelector('input[name="collections"][value="qna"]');
+const categorySelect = document.getElementById("category-select");
+
+function syncCategoryState() {
+  const enabled = qnaCheckbox.checked;
+  categorySelect.disabled = !enabled;
+  if (!enabled) categorySelect.value = "";
+}
+
+qnaCheckbox.addEventListener("change", syncCategoryState);
 
 // ---------------------------------------------------------------------------
 // Init

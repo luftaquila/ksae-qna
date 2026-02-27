@@ -152,20 +152,22 @@ def is_model_available(model: str) -> bool:
 
 
 def get_models() -> list[dict]:
-    """Return list of available models (provider initialized + admin enabled)."""
+    """Return all models with availability status."""
     result = []
     for model_key, cfg in MODEL_CONFIG.items():
-        if not _model_enabled.get(model_key, True):
-            continue
+        admin_enabled = _model_enabled.get(model_key, True)
+        provider_ok = True
         if cfg["provider"] == "gemini" and _gemini is None:
-            continue
+            provider_ok = False
         if cfg["provider"] == "anthropic" and _anthropic is None:
-            continue
+            provider_ok = False
+        available = admin_enabled and provider_ok
         result.append({
             "id": model_key,
             "label": cfg["label"],
             "credits": get_effective_credits(model_key),
             "pricing": cfg["pricing"],
+            "available": available,
         })
     return result
 

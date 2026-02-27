@@ -739,8 +739,13 @@ header h1 {
 }
 
 .model-select:hover,
-.category-select:hover {
+.category-select:hover:not(:disabled) {
   background-color: color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+
+.category-select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .collection-chip {
@@ -878,6 +883,12 @@ header h1 {
   background: color-mix(in srgb, var(--color-primary) 10%, transparent);
   padding: 3px 10px;
   border-radius: 10px;
+}
+
+.welcome-model.disabled {
+  color: var(--text-tertiary);
+  background: color-mix(in srgb, var(--text-tertiary) 10%, transparent);
+  text-decoration: line-through;
 }
 
 .welcome-items {
