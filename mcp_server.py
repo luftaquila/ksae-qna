@@ -9,12 +9,15 @@ import os
 import sys
 from typing import Any
 
+from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 
+load_dotenv()
+
 # Configuration
 QDRANT_URL = os.environ.get("QDRANT_URL", "https://vectordb.luftaquila.io:443")
-QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "eyJhbGciOiJIUzI1NiJ9.eyJhY2Nlc3MiOlt7ImNvbGxlY3Rpb24iOiJrc2FlLWZvcm11bGEtcnVsZXMiLCJhY2Nlc3MiOiJyIn0seyJjb2xsZWN0aW9uIjoia3NhZS1xbmEiLCJhY2Nlc3MiOiJyIn1dfQ.qMW_0GVA5nc9_SuT87vrVOwJleH6f_p5F9K8wzoTfkk")
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 EMBEDDING_MODEL = "BAAI/bge-m3"
 
 # Initialize clients

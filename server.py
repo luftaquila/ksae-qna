@@ -4,13 +4,14 @@ FastAPI server for KSAE Q&A chatbot.
 
 import json
 import os
+import secrets
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.auth import (
@@ -45,6 +46,26 @@ from src.chat import MODEL_CONFIG, get_all_models_admin, get_effective_credits, 
 load_dotenv()
 
 
+def _ensure_jwt_secret() -> str:
+    """Return JWT_SECRET from env, auto-generating and persisting to .env if absent."""
+    secret = os.environ.get("JWT_SECRET")
+    if secret:
+        return secret
+
+    secret = secrets.token_hex(32)
+    os.environ["JWT_SECRET"] = secret
+
+    env_path = os.path.join(os.path.dirname(__file__) or ".", ".env")
+    with open(env_path, "a", encoding="utf-8") as f:
+        f.write(f"\nJWT_SECRET={secret}\n")
+
+    print(f"Generated new JWT_SECRET and saved to .env")
+    return secret
+
+
+JWT_SECRET = _ensure_jwt_secret()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -58,7 +79,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.environ.get("JWT_SECRET", "dev"),
+    secret_key=JWT_SECRET,
     https_only=os.environ.get("HTTPS_ONLY", "").lower() in ("1", "true"),
 )
 
@@ -74,8 +95,8 @@ async def fix_request_scheme(request: Request, call_next):
 
 
 class ChatRequest(BaseModel):
-    query: str
-    limit: int = 5
+    query: str = Field(..., min_length=1, max_length=2000)
+    limit: int = Field(default=5, ge=1, le=20)
     session_id: int | None = None
     collections: list[str] | None = None
     category: str | None = None
@@ -83,21 +104,21 @@ class ChatRequest(BaseModel):
 
 
 class SessionPatch(BaseModel):
-    title: str
+    title: str = Field(..., min_length=1, max_length=100)
 
 
 class TopupRequest(BaseModel):
-    amount: int
+    amount: int = Field(..., ge=1, le=1000)
 
 
 class AdminCreditRequest(BaseModel):
-    credits: int
-    memo: str = "관리자 조정"
+    credits: int = Field(..., ge=0)
+    memo: str = Field(default="관리자 조정", max_length=200)
 
 
 class ModelToggleRequest(BaseModel):
     enabled: bool
-    credits: int | None = None
+    credits: int | None = Field(default=None, ge=0)
 
 
 # ---------------------------------------------------------------------------
@@ -427,8 +448,6 @@ async def admin_toggle_model(model_key: str, body: ModelToggleRequest, request: 
         return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
     if model_key not in MODEL_CONFIG:
         return JSONResponse({"error": "존재하지 않는 모델입니다"}, status_code=404)
-    if body.credits is not None and body.credits < 0:
-        return JSONResponse({"error": "크레딧은 0 이상이어야 합니다"}, status_code=400)
     set_model_admin_settings(model_key, body.enabled, body.credits)
     return {"ok": True, "model_key": model_key, "enabled": body.enabled, "credits": get_effective_credits(model_key)}
 

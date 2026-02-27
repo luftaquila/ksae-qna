@@ -300,7 +300,10 @@ def get_transactions(user_id: int, limit: int = 30) -> list[dict]:
 # JWT helpers
 # ---------------------------------------------------------------------------
 def _jwt_secret() -> str:
-    return os.environ.get("JWT_SECRET", "dev")
+    secret = os.environ.get("JWT_SECRET")
+    if not secret:
+        raise RuntimeError("JWT_SECRET environment variable is not set")
+    return secret
 
 
 def create_jwt(user_id: int) -> str:

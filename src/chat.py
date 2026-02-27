@@ -4,10 +4,13 @@ RAG search + multi-model LLM streaming for KSAE Q&A chatbot.
 
 import asyncio
 import json
+import logging
 import os
 from collections.abc import AsyncIterator
 
 import anthropic
+
+logger = logging.getLogger(__name__)
 from google import genai
 from google.genai import types
 from qdrant_client import QdrantClient, models
@@ -315,7 +318,8 @@ async def _stream_gemini(
                 if hasattr(um, "thoughts_token_count") and um.thoughts_token_count is not None:
                     thinking_tokens = um.thoughts_token_count
     except Exception as e:
-        error_msg = json.dumps(f"LLM 호출 오류: {e}", ensure_ascii=False)
+        logger.exception("Gemini streaming error: %s", e)
+        error_msg = json.dumps("LLM 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", ensure_ascii=False)
         yield f"event: error\ndata: {error_msg}\n\n"
 
     usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens, "thinking_tokens": thinking_tokens})
@@ -377,7 +381,8 @@ async def _stream_anthropic(
                 pass  # just ignore cache tokens for now
 
     except Exception as e:
-        error_msg = json.dumps(f"LLM 호출 오류: {e}", ensure_ascii=False)
+        logger.exception("Anthropic streaming error: %s", e)
+        error_msg = json.dumps("LLM 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", ensure_ascii=False)
         yield f"event: error\ndata: {error_msg}\n\n"
 
     usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens, "thinking_tokens": thinking_tokens})
