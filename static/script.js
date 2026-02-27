@@ -269,6 +269,7 @@ async function switchSession(id) {
 function startNewChat() {
   currentSessionId = null;
   renderSessionList();
+  chat.innerHTML = "";
   showWelcome();
   queryInput.focus();
 }
