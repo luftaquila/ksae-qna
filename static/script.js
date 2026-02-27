@@ -68,7 +68,12 @@ function renderAuthUI() {
       <div class="token-wrapper">
         <span class="credit-badge${lowClass}" id="credit-badge">${currentUser.credits} 토큰</span>
       </div>
-      <button class="logout-btn" id="logout-btn" title="로그아웃">&#9211;</button>
+      <button class="logout-btn" id="logout-btn" title="로그아웃">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+          <line x1="12" y1="2" x2="12" y2="12"></line>
+        </svg>
+      </button>
     `;
 
     document.getElementById("logout-btn").addEventListener("click", handleLogout);
@@ -534,7 +539,7 @@ function showWelcome() {
           <span class="welcome-icon">&#128218;</span>
           <span>입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.
             <ul class="welcome-chip-list">
-              <li><b>카테고리</b> &mdash; Q&A 카테고리 필터 (Formula / Baja / EV / 전체)</li>
+              <li><b>카테고리</b> &mdash; Q&A 카테고리 필터</li>
               <li><b>Q&A</b> &mdash; QnA 게시판 데이터</li>
               <li><b>규정</b> &mdash; 대회 규정집 (2026 Formula)</li>
             </ul>

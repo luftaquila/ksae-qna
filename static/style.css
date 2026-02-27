@@ -500,8 +500,12 @@ header h1 {
   background: none;
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 0.75rem;
+  padding: 0 8px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
   cursor: pointer;
   color: var(--text-tertiary);
 }
@@ -932,8 +936,12 @@ header h1 {
   background: none;
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 1.1rem;
+  padding: 4px;
+  width: 32px;
+  height: 32px;
+  display: none;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   color: var(--text-primary);
   line-height: 1;
@@ -959,8 +967,9 @@ header h1 {
   .input-area { padding: 10px 12px; gap: 6px; }
   .header-top { flex-wrap: wrap; }
   .profile-name { display: none; }
+  #auth-area { gap: 6px; }
 
-  .sidebar-toggle { display: block; }
+  .sidebar-toggle { display: flex; }
 
   .sidebar {
     position: fixed;
