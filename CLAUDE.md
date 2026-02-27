@@ -9,20 +9,25 @@ ksae-qna/
 ├── main.py                # CLI 파이프라인 (crawl → chunk → embed → upload)
 ├── mcp_server.py          # MCP 프로토콜 기반 시맨틱 검색 서버 (stdin/stdout JSON-RPC)
 ├── server.py              # FastAPI 웹 챗봇 서버 (SSE 스트리밍)
+├── Dockerfile             # Docker 컨테이너 빌드
 ├── requirements.txt
 ├── .env                   # 환경 변수 (API 키 등)
 ├── .env.example           # 환경 변수 템플릿
 ├── src/
-│   ├── auth.py            # Google OAuth, JWT, 사용자 DB, 토큰 시스템 + 거래 내역
+│   ├── auth.py            # Google OAuth, JWT, 사용자 DB, 토큰 시스템 + 거래 내역 + 관리자
 │   ├── crawler.py         # KSAE Q&A 게시판 크롤링 (목록 + 상세)
 │   ├── chunker.py         # 텍스트 청킹 (512 토큰, 50 오버랩)
 │   ├── embedder.py        # BGE-M3 임베딩 (1024차원, 로컬/원격)
 │   ├── uploader.py        # Qdrant 벡터 DB 업로드
-│   └── chat.py            # RAG 멀티컬렉션 검색 + Gemini LLM 스트리밍 호출
+│   └── chat.py            # RAG 멀티컬렉션 검색 + Gemini LLM 스트리밍 + 카테고리 필터
 ├── static/
-│   ├── index.html         # 채팅 UI (라이트/다크 테마)
+│   ├── index.html         # 채팅 UI (라이트/다크 테마, 모바일 사이드바)
 │   ├── style.css          # CSS 변수 기반 테마 시스템
-│   └── script.js          # SSE 수신 + 마크다운 렌더링 + 테마 토글
+│   ├── script.js          # SSE 수신 + 마크다운 렌더링 + 테마 토글
+│   ├── admin.html         # 관리자 페이지
+│   ├── admin.css          # 관리자 페이지 스타일
+│   ├── admin.js           # 관리자 페이지 로직
+│   └── logo.svg           # 로고 (헤더 + favicon)
 └── data/
     ├── raw/               # 크롤링 원본 (posts.json, post_list.json)
     └── processed/         # 처리 결과 (chunks.json, embeddings.npy)
@@ -51,6 +56,10 @@ python main.py upload                 # 업로드만
 # 웹 챗봇 서버
 python server.py                      # http://localhost:8000
 
+# Docker
+docker build -t pitbot .
+docker run -p 8000:8000 --env-file .env pitbot
+
 # MCP 서버 (Claude 등 AI 클라이언트용)
 python mcp_server.py                  # stdin/stdout JSON-RPC
 ```
@@ -65,6 +74,7 @@ python mcp_server.py                  # stdin/stdout JSON-RPC
 - `GOOGLE_CLIENT_ID` — Google OAuth 클라이언트 ID
 - `GOOGLE_CLIENT_SECRET` — Google OAuth 클라이언트 시크릿
 - `JWT_SECRET` — JWT 서명 시크릿 (선택, 기본값: "dev")
+- `ADMIN_EMAILS` — 관리자 이메일 (쉼표 구분, `/admin` 접근 권한)
 
 ## 코딩 컨벤션
 
@@ -75,8 +85,11 @@ python mcp_server.py                  # stdin/stdout JSON-RPC
   - `ksae-qna` (키: `qna`) — Q&A 게시판. Payload: `id`, `category`, `title`, `author`, `date`, `url`, `content`, `chunk_index`
   - `ksae-formula-rules` (키: `rules`) — 규정집. Payload: `content`, `chapter`, `chapter_num`, `section`, `section_num`
 - 프론트엔드에서 컬렉션 선택 칩으로 검색 대상을 선택 가능 (Q&A / 규정, 복수 선택)
+- 카테고리 드롭다운으로 Q&A 검색 시 Formula/Baja/EV 필터링 (Qdrant `FieldCondition` 사용)
 - 검색 시 선택된 컬렉션 각각에서 `limit`개씩 조회 후 score 순 병합, 상위 `limit`개 반환
 - `server.py`의 `min_score=0.5` 로 저품질 결과 필터링
+- 관리자 페이지 (`/admin`): 사용자 크레딧 관리, 대화 기록 열람, API 토큰 사용량 확인
+- 날짜 표시는 UTC→로컬 변환, `YYYY-MM-DD HH:mm:ss` 형식
 
 ## 주의사항
 
