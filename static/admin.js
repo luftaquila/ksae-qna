@@ -91,7 +91,7 @@ function renderUsers(filter = "") {
       const totalIn = u.total_input_tokens || 0;
       const totalOut = u.total_output_tokens || 0;
       const totalThink = u.total_thinking_tokens || 0;
-      const cost = estimateCost(totalIn, totalOut, totalThink);
+      const cost = estimateModelCost(u.model_usage || []);
       return `<tr data-user-id="${u.id}">
         <td>${pic}${escapeHtml(u.name)}</td>
         <td>${escapeHtml(u.email)}</td>
@@ -166,8 +166,11 @@ window.saveCredits = async function (userId) {
 window.cancelCreditEdit = function (userId, currentCredits) {
   const cell = document.getElementById(`credit-cell-${userId}`);
   if (!cell) return;
+  const lowClass = currentCredits <= lowCreditThreshold ? " low" : "";
   cell.innerHTML = `
-    <span class="credit-value">${currentCredits}</span>
+    <div class="token-wrapper">
+      <span class="credit-badge${lowClass}" onclick="toggleAdminPopover(${userId})">${currentCredits} 크레딧</span>
+    </div>
     <button class="credit-adjust-btn" onclick="showCreditEditor(${userId}, ${currentCredits})">조정</button>
   `;
 };
@@ -707,6 +710,16 @@ function estimateCost(inputTokens, outputTokens, thinkingTokens = 0, model = nul
   const cost = (inputTokens * p.input + outputTokens * p.output + thinkingTokens * p.thinking) / 1_000_000;
   if (cost < 0.01) return "$" + cost.toFixed(4);
   return "$" + cost.toFixed(2);
+}
+
+function estimateModelCost(modelUsage) {
+  let total = 0;
+  for (const u of modelUsage) {
+    const p = (u.model && MODEL_PRICING[u.model]) || DEFAULT_PRICING;
+    total += (u.input_tokens * p.input + u.output_tokens * p.output + u.thinking_tokens * p.thinking) / 1_000_000;
+  }
+  if (total < 0.01) return "$" + total.toFixed(4);
+  return "$" + total.toFixed(2);
 }
 
 function formatLocal(utcStr) {

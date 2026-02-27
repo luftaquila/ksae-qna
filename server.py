@@ -29,6 +29,7 @@ from src.auth import (
     get_current_user,
     get_messages,
     get_site_setting,
+    get_all_users_token_usage_by_model,
     get_user_token_usage_by_model,
     get_or_create_user,
     get_session,
@@ -418,7 +419,11 @@ async def admin_check(request: Request):
 async def admin_users(request: Request):
     if not is_admin(request):
         return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
-    return {"users": list_all_users()}
+    users = list_all_users()
+    usage_map = get_all_users_token_usage_by_model()
+    for u in users:
+        u["model_usage"] = usage_map.get(u["id"], [])
+    return {"users": users}
 
 
 @app.patch("/api/admin/users/{user_id}/credits")

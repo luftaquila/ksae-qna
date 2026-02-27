@@ -525,6 +525,40 @@ def list_all_users() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_all_users_token_usage_by_model() -> dict[int, list[dict]]:
+    """Return per-model token usage for all users, keyed by user_id."""
+    conn = _get_conn()
+    rows = conn.execute(
+        """
+        SELECT s.user_id,
+               m.model,
+               COALESCE(SUM(m.input_tokens), 0) AS input_tokens,
+               COALESCE(SUM(m.output_tokens), 0) AS output_tokens,
+               COALESCE(SUM(m.thinking_tokens), 0) AS thinking_tokens,
+               COUNT(*) AS message_count
+        FROM sessions s
+        JOIN messages m ON m.session_id = s.id AND m.role = 'assistant'
+        WHERE m.input_tokens IS NOT NULL
+        GROUP BY s.user_id, m.model
+        ORDER BY s.user_id, m.model
+        """
+    ).fetchall()
+    conn.close()
+    result: dict[int, list[dict]] = {}
+    for r in rows:
+        uid = r["user_id"]
+        if uid not in result:
+            result[uid] = []
+        result[uid].append({
+            "model": r["model"],
+            "input_tokens": r["input_tokens"],
+            "output_tokens": r["output_tokens"],
+            "thinking_tokens": r["thinking_tokens"],
+            "message_count": r["message_count"],
+        })
+    return result
+
+
 def get_user_token_usage_by_model(user_id: int) -> list[dict]:
     """Return per-model token usage breakdown for a user."""
     conn = _get_conn()
