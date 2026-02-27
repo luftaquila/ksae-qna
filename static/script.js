@@ -586,7 +586,7 @@ function showWelcome() {
         <p class="welcome-subtitle">자작자동차 규정 및 Q&A 챗봇</p>
       </div>
       <div class="welcome-models">
-        <div class="welcome-models-title">모델 선택 (소모 크레딧)</div>
+        <div class="welcome-models-title">사용 가능 모델 (소모 크레딧)</div>
         <div class="welcome-models-grid">
           ${buildWelcomeModelRows()}
         </div>

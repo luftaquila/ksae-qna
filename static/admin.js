@@ -72,6 +72,7 @@ async function loadUsers() {
     allUsers = [];
   }
   renderUsers();
+  renderUsageSummary();
   populateUserFilter();
 }
 
@@ -113,6 +114,60 @@ function renderUsers(filter = "") {
       </tr>`;
     })
     .join("");
+}
+
+function renderUsageSummary() {
+  const el = document.getElementById("usage-summary");
+  if (!el) return;
+
+  // Aggregate model_usage across all users
+  const modelMap = {};
+  for (const u of allUsers) {
+    for (const mu of (u.model_usage || [])) {
+      const key = mu.model || "(미기록)";
+      if (!modelMap[key]) modelMap[key] = { input: 0, output: 0, thinking: 0, count: 0, model: mu.model };
+      modelMap[key].input += mu.input_tokens;
+      modelMap[key].output += mu.output_tokens;
+      modelMap[key].thinking += mu.thinking_tokens;
+      modelMap[key].count += mu.message_count;
+    }
+  }
+
+  const models = Object.keys(modelMap).sort();
+  if (!models.length) {
+    el.innerHTML = "";
+    return;
+  }
+
+  let totalCost = 0;
+  const cards = models.map((key) => {
+    const m = modelMap[key];
+    const p = (m.model && MODEL_PRICING[m.model]) || DEFAULT_PRICING;
+    const cost = (m.input * p.input + m.output * p.output + m.thinking * p.thinking) / 1_000_000;
+    totalCost += cost;
+    const costStr = cost < 0.01 ? "$" + cost.toFixed(4) : "$" + cost.toFixed(2);
+    return `<div class="summary-card">
+      <div class="summary-card-title">${escapeHtml(key)}</div>
+      <div class="summary-card-stats">
+        <span>IN ${m.input.toLocaleString()}</span>
+        <span>OUT ${m.output.toLocaleString()}</span>
+        <span>THK ${m.thinking.toLocaleString()}</span>
+      </div>
+      <div class="summary-card-footer">
+        <span class="summary-card-count">${m.count.toLocaleString()}회</span>
+        <span class="summary-card-cost">${costStr}</span>
+      </div>
+    </div>`;
+  }).join("");
+
+  const totalCostStr = totalCost < 0.01 ? "$" + totalCost.toFixed(4) : "$" + totalCost.toFixed(2);
+  el.innerHTML = `
+    <div class="summary-cards">${cards}</div>
+    <div class="summary-total">
+      <span>총 비용</span>
+      <span class="summary-total-cost">${totalCostStr}</span>
+    </div>
+  `;
 }
 
 userSearch.addEventListener("input", () => {
