@@ -84,7 +84,7 @@ function renderUsers(filter = "") {
       const pic = u.picture
         ? `<img src="${escapeAttr(u.picture)}" class="user-picture" referrerpolicy="no-referrer">`
         : "";
-      const date = (u.created_at || "").slice(0, 10);
+      const date = u.created_at ? formatLocal(u.created_at) : "";
       const lowClass = u.credits <= 2 ? " low" : "";
       return `<tr data-user-id="${u.id}">
         <td>${pic}${escapeHtml(u.name)}</td>
@@ -220,7 +220,7 @@ async function loadAdminTransactions(userId) {
       const isUsage = t.amount < 0;
       const sign = isUsage ? "" : "+";
       const cls = isUsage ? "usage" : "purchase";
-      const date = (t.created_at || "").slice(0, 16).replace("T", " ");
+      const date = t.created_at ? formatLocal(t.created_at) : "";
       return `<div class="token-tx ${cls}">
         <div class="token-tx-info">
           <span class="token-tx-memo">${escapeHtml(t.memo || t.type)}</span>
@@ -272,7 +272,7 @@ function renderSessionList(sessions) {
 
   convSessionList.innerHTML = sessions
     .map((s) => {
-      const date = (s.updated_at || "").slice(0, 16).replace("T", " ");
+      const date = s.updated_at ? formatLocal(s.updated_at) : "";
       const userName = s.user_name || "";
       return `<div class="conv-session-item" data-session-id="${s.id}">
         <div class="conv-session-title">${escapeHtml(s.title)}</div>
@@ -308,7 +308,7 @@ async function loadMessages(sessionId) {
     for (const msg of messages) {
       const role = msg.role === "user" ? "user" : "assistant";
       const roleLabel = role === "user" ? "사용자" : "어시스턴트";
-      const time = (msg.created_at || "").slice(11, 19);
+      const time = msg.created_at ? formatLocal(msg.created_at) : "";
 
       const el = document.createElement("div");
       el.className = `admin-msg ${role}`;
@@ -392,6 +392,17 @@ function renderSources(container, sources) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+function formatLocal(utcStr) {
+  const d = new Date(utcStr + (utcStr.endsWith("Z") ? "" : "Z"));
+  const yy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${yy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;

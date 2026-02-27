@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 
 from google import genai
 from google.genai import types
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 from sentence_transformers import SentenceTransformer
 
 # Globals initialized once at server startup
@@ -67,11 +67,13 @@ def search(
     limit: int = 5,
     min_score: float = 0.0,
     collections: list[str] | None = None,
+    category: str | None = None,
 ) -> list[dict]:
     """Encode query with BGE-M3 and search Qdrant for similar chunks.
 
     *collections* is a list of short keys (``"qna"``, ``"rules"``).
     When ``None`` or empty, all collections are searched.
+    *category* filters qna results by category (e.g. ``"Formula"``, ``"Baja"``, ``"EV"``).
     """
     if not collections:
         collections = list(COLLECTIONS.keys())
@@ -79,12 +81,22 @@ def search(
 
     vector = _model.encode(query).tolist()
 
+    # Build category filter for qna collection
+    category_filter = None
+    if category:
+        category_filter = models.Filter(
+            must=[models.FieldCondition(key="category", match=models.MatchValue(value=category))]
+        )
+
     output: list[dict] = []
     for col_name in collection_names:
+        # Only apply category filter to qna collection
+        qf = category_filter if (category and col_name == COLLECTIONS.get("qna")) else None
         results = _qdrant.query_points(
             collection_name=col_name,
             query=vector,
             limit=limit,
+            query_filter=qf,
         )
 
         for hit in results.points:
@@ -134,6 +146,7 @@ async def search_and_stream(
     min_score: float = 0.0,
     history: list[dict] | None = None,
     collections: list[str] | None = None,
+    category: str | None = None,
 ) -> AsyncIterator[str]:
     """
     Async generator that yields SSE-formatted events:
@@ -145,7 +158,7 @@ async def search_and_stream(
     collections: list of collection keys ("qna", "rules") to search.
     """
     # Step 1: Search
-    sources = search(query, limit, min_score, collections)
+    sources = search(query, limit, min_score, collections, category)
 
     # Yield sources event
     yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"

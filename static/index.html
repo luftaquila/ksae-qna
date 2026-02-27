@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PitBot</title>
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script>
@@ -19,9 +20,10 @@
   <div class="app-layout">
     <header>
       <div class="header-top">
-        <div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button id="sidebar-toggle" class="sidebar-toggle" aria-label="메뉴">&#9776;</button>
+          <img src="/static/logo.svg" alt="PitBot" class="header-logo">
           <h1>PitBot</h1>
-          <p class="subtitle">자작자동차 규정 및 Q&A 챗봇</p>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <div id="auth-area"></div>
@@ -35,20 +37,21 @@
         <button id="new-chat-btn" class="new-chat-btn">+ 새 대화</button>
         <div id="session-list" class="session-list"></div>
       </aside>
+      <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
       <div class="main">
         <div class="chat-wrapper">
           <div id="chat" class="chat"></div>
-          <div id="login-overlay" class="login-overlay hidden">
-            <div class="overlay-content">
-              <p>질문하려면 로그인이 필요합니다</p>
-              <a href="/api/auth/login" class="login-btn google-login">Google로 로그인</a>
-            </div>
-          </div>
         </div>
 
         <form id="form" class="input-area">
           <div class="collection-selector">
+            <select id="category-select" class="category-select">
+              <option value="">전체</option>
+              <option value="Formula">Formula</option>
+              <option value="Baja">Baja</option>
+              <option value="EV">EV</option>
+            </select>
             <label class="collection-chip">
               <input type="checkbox" name="collections" value="qna" checked>
               <span>Q&amp;A</span>
@@ -58,14 +61,16 @@
               <span>규정</span>
             </label>
           </div>
-          <input
-            id="query"
-            type="text"
-            placeholder="질문을 입력하세요..."
-            autocomplete="off"
-            required
-          >
-          <button type="submit" id="send">전송</button>
+          <div class="input-row">
+            <input
+              id="query"
+              type="text"
+              placeholder="질문을 입력하세요..."
+              autocomplete="off"
+              required
+            >
+            <button type="submit" id="send">전송</button>
+          </div>
         </form>
       </div>
     </div>

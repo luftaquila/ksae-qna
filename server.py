@@ -62,6 +62,7 @@ class ChatRequest(BaseModel):
     limit: int = 5
     session_id: int | None = None
     collections: list[str] | None = None
+    category: str | None = None
 
 
 class SessionPatch(BaseModel):
@@ -256,7 +257,7 @@ async def chat(request: Request, req: ChatRequest):
         input_tokens = None
         output_tokens = None
 
-        async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections):
+        async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections, category=req.category):
             yield event
 
             # Collect data for persistence

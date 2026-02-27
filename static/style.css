@@ -147,6 +147,12 @@ header h1 {
   color: var(--text-heading);
 }
 
+.header-logo {
+  height: 24px;
+  width: auto;
+  flex-shrink: 0;
+}
+
 .subtitle {
   font-size: 0.8rem;
   color: var(--text-tertiary);
@@ -264,6 +270,7 @@ header h1 {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
 }
 
 /* ==========================================================================
@@ -667,19 +674,49 @@ header h1 {
    ========================================================================== */
 .input-area {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
   padding: 12px 20px;
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
-/* Collection selector chips */
 .collection-selector {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex-shrink: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.category-select {
+  padding: 4px 8px;
+  border: 1.5px solid var(--color-primary);
+  border-radius: 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%234d94ff'/%3E%3C/svg%3E") no-repeat right 8px center;
+  cursor: pointer;
+  outline: none;
+  text-align: center;
+  padding-right: 22px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.category-select option {
+  background: var(--bg-container);
+  color: var(--text-primary);
+}
+
+.category-select:hover {
+  background-color: color-mix(in srgb, var(--color-primary) 15%, transparent);
 }
 
 .collection-chip {
@@ -724,8 +761,9 @@ header h1 {
   border-color: var(--color-primary);
 }
 
-.input-area input {
+.input-row input {
   flex: 1;
+  min-width: 0;
   padding: 10px 14px;
   border: 1px solid var(--border-input);
   border-radius: 20px;
@@ -736,13 +774,13 @@ header h1 {
   color: var(--text-primary);
 }
 
-.input-area input::placeholder {
+.input-row input::placeholder {
   color: var(--text-tertiary);
 }
 
-.input-area input:focus { border-color: var(--color-primary); }
+.input-row input:focus { border-color: var(--color-primary); }
 
-.input-area button {
+.input-row button {
   padding: 10px 20px;
   background: var(--color-primary);
   color: #fff;
@@ -754,8 +792,114 @@ header h1 {
   transition: background 0.2s;
 }
 
-.input-area button:hover { background: var(--color-primary-hover); }
-.input-area button:disabled { background: var(--color-primary-disabled); cursor: not-allowed; }
+.input-row button:hover { background: var(--color-primary-hover); }
+.input-row button:disabled { background: var(--color-primary-disabled); cursor: not-allowed; }
+
+/* ==========================================================================
+   Welcome Screen (empty chat)
+   ========================================================================== */
+.welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 20px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.welcome-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+.welcome-subtitle {
+  font-size: 0.88rem;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+.welcome-model {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.welcome-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 520px;
+  width: 100%;
+}
+
+.welcome-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.welcome-icon {
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+  font-size: 1rem;
+}
+
+.welcome-chip-list {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+  list-style: disc;
+}
+
+.welcome-chip-list li {
+  margin-bottom: 2px;
+}
+
+.welcome-warn {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  max-width: 520px;
+}
+
+.welcome-contact {
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: var(--text-tertiary);
+}
+
+.welcome-contact a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.welcome-contact a:hover {
+  text-decoration: underline;
+}
+
+.welcome-login {
+  margin-top: 16px;
+  text-align: center;
+}
+
+.welcome-login p {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
 
 /* ==========================================================================
    Loading Animation
@@ -781,6 +925,30 @@ header h1 {
 .chat::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
 /* ==========================================================================
+   Sidebar Toggle (mobile only)
+   ========================================================================== */
+.sidebar-toggle {
+  display: none;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  color: var(--text-primary);
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.sidebar-overlay {
+  display: none;
+}
+
+/* ==========================================================================
    Responsive
    ========================================================================== */
 @media (max-width: 600px) {
@@ -788,7 +956,38 @@ header h1 {
   .msg.assistant { max-width: 98%; }
   header { padding: 12px 16px; }
   .chat { padding: 12px 16px; }
-  .input-area { padding: 10px 16px; }
+  .input-area { padding: 10px 12px; gap: 6px; }
   .header-top { flex-wrap: wrap; }
   .profile-name { display: none; }
+
+  .sidebar-toggle { display: block; }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    border-right: 1px solid var(--border-color);
+    padding-top: 16px;
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 99;
+  }
+
+  .sidebar-overlay.open {
+    display: block;
+  }
 }
