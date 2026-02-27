@@ -798,20 +798,21 @@ async function loadSettings() {
   }
 }
 
-window.saveSettings = async function () {
+let _settingsSaveTimer = null;
+
+function autoSaveSettings() {
+  clearTimeout(_settingsSaveTimer);
+  _settingsSaveTimer = setTimeout(doSaveSettings, 500);
+}
+
+async function doSaveSettings() {
   const input = document.getElementById("setting-default-credits");
   const thresholdInput = document.getElementById("setting-low-credit-threshold");
   if (!input || !thresholdInput) return;
 
   const defaultCredits = parseInt(input.value, 10);
   const threshold = parseInt(thresholdInput.value, 10);
-  if (isNaN(defaultCredits) || defaultCredits < 0 || isNaN(threshold) || threshold < 0) {
-    alert("올바른 값을 입력하세요");
-    return;
-  }
-
-  const btn = document.getElementById("save-settings-btn");
-  if (btn) btn.disabled = true;
+  if (isNaN(defaultCredits) || defaultCredits < 0 || isNaN(threshold) || threshold < 0) return;
 
   try {
     const res = await fetch("/api/admin/settings", {
@@ -821,22 +822,16 @@ window.saveSettings = async function () {
     });
     if (res.ok) {
       const data = await res.json();
-      input.value = data.settings.default_credits;
-      thresholdInput.value = data.settings.low_credit_threshold;
-      lowCreditThreshold = parseInt(data.settings.low_credit_threshold, 10) || 2;
+      lowCreditThreshold = parseInt(data.settings.low_credit_threshold, 10) || 5;
       renderUsers(userSearch.value);
-      btn.textContent = "저장됨";
-      setTimeout(() => { btn.textContent = "저장"; }, 1500);
-    } else {
-      const err = await res.json();
-      alert(err.error || "저장에 실패했습니다");
     }
   } catch {
-    alert("저장에 실패했습니다");
-  } finally {
-    if (btn) btn.disabled = false;
+    // silently ignore — value will be retried on next change
   }
-};
+}
+
+document.getElementById("setting-default-credits").addEventListener("change", autoSaveSettings);
+document.getElementById("setting-low-credit-threshold").addEventListener("change", autoSaveSettings);
 
 // ---------------------------------------------------------------------------
 // Helpers

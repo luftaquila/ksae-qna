@@ -570,14 +570,14 @@ function renderModelSelect() {
 // Welcome screen
 // ---------------------------------------------------------------------------
 function buildWelcomeModelRows() {
-  if (!availableModels.length) return "";
+  const models = availableModels.filter((m) => m.available);
+  if (!models.length) return "";
   // Group models into rows of 2
   const rows = [];
-  for (let i = 0; i < availableModels.length; i += 2) {
-    const pair = availableModels.slice(i, i + 2);
+  for (let i = 0; i < models.length; i += 2) {
+    const pair = models.slice(i, i + 2);
     const spans = pair.map((m) => {
-      const cls = m.available ? "welcome-model" : "welcome-model disabled";
-      return `<span class="${cls}">${escapeHtml(m.label)} (${m.credits})</span>`;
+      return `<span class="welcome-model">${escapeHtml(m.label)} (${m.credits})</span>`;
     }).join("");
     rows.push(`<div class="welcome-models-row">${spans}</div>`);
   }

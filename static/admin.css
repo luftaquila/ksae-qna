@@ -904,26 +904,6 @@
   border-color: var(--color-primary);
 }
 
-.settings-save-btn {
-  padding: 6px 16px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  background: var(--color-primary);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.settings-save-btn:hover {
-  background: var(--color-primary-hover);
-}
-
-.settings-save-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
 
 .settings-hint {
   font-size: 0.75rem;
@@ -935,6 +915,80 @@
    Responsive
    ========================================================================== */
 @media (max-width: 768px) {
+  /* Header */
+  .admin-header {
+    padding: 12px 16px;
+  }
+
+  .admin-header-left h1 {
+    font-size: 1.05rem;
+  }
+
+  .admin-back-link {
+    font-size: 0;
+  }
+
+  .admin-back-link::before {
+    content: "← 채팅";
+    font-size: 0.78rem;
+  }
+
+  /* Tabs: horizontal scroll */
+  .admin-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .admin-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .admin-tab {
+    padding: 10px 16px;
+    font-size: 0.82rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Tab panels */
+  .tab-panel {
+    padding: 16px;
+    overflow: auto;
+  }
+
+  /* Summary cards */
+  .summary-cards {
+    gap: 8px;
+  }
+
+  .summary-card {
+    min-width: 140px;
+    padding: 10px 12px;
+  }
+
+  .summary-card-title {
+    font-size: 0.75rem;
+  }
+
+  .summary-card-stats {
+    font-size: 0.65rem;
+    gap: 6px;
+  }
+
+  /* Users table: horizontal scroll */
+  .users-table {
+    font-size: 0.78rem;
+    min-width: 700px;
+  }
+
+  .users-table th,
+  .users-table td {
+    padding: 8px 10px;
+    white-space: nowrap;
+  }
+
+  /* Conversations */
   .conversations-layout {
     flex-direction: column;
   }
@@ -946,12 +1000,34 @@
     border-bottom: 1px solid var(--border-color);
   }
 
-  .users-table {
-    font-size: 0.78rem;
+  .conv-messages {
+    padding: 16px;
   }
 
-  .users-table th,
-  .users-table td {
-    padding: 8px 10px;
+  .admin-msg {
+    max-width: 95%;
+  }
+
+  .admin-msg-footer {
+    flex-wrap: wrap;
+  }
+
+  /* Models */
+  .models-grid {
+    max-width: 100%;
+  }
+
+  .models-description {
+    font-size: 0.8rem;
+  }
+
+  /* Settings */
+  .settings-form {
+    max-width: 100%;
+  }
+
+  /* Popovers: full-width inside container */
+  .api-token-popover {
+    width: 280px;
   }
 }
