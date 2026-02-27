@@ -535,6 +535,58 @@ window.resetModelCredits = async function (modelKey) {
 };
 
 // ---------------------------------------------------------------------------
+// Settings tab
+// ---------------------------------------------------------------------------
+async function loadSettings() {
+  try {
+    const res = await fetch("/api/admin/settings");
+    const data = await res.json();
+    const settings = data.settings || {};
+    const input = document.getElementById("setting-default-credits");
+    if (input && settings.default_credits !== undefined) {
+      input.value = settings.default_credits;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+window.saveSettings = async function () {
+  const input = document.getElementById("setting-default-credits");
+  if (!input) return;
+
+  const defaultCredits = parseInt(input.value, 10);
+  if (isNaN(defaultCredits) || defaultCredits < 0) {
+    alert("올바른 값을 입력하세요");
+    return;
+  }
+
+  const btn = document.getElementById("save-settings-btn");
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch("/api/admin/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ default_credits: defaultCredits }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      input.value = data.settings.default_credits;
+      btn.textContent = "저장됨";
+      setTimeout(() => { btn.textContent = "저장"; }, 1500);
+    } else {
+      const err = await res.json();
+      alert(err.error || "저장에 실패했습니다");
+    }
+  } catch {
+    alert("저장에 실패했습니다");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 // Per-model pricing (per 1M tokens)
@@ -584,5 +636,6 @@ checkAdmin().then((ok) => {
   if (ok) {
     loadUsers();
     loadModels();
+    loadSettings();
   }
 });

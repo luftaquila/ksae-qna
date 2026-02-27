@@ -37,6 +37,7 @@
       <button class="admin-tab active" data-tab="users">사용자 관리</button>
       <button class="admin-tab" data-tab="conversations">대화 기록</button>
       <button class="admin-tab" data-tab="models">모델 관리</button>
+      <button class="admin-tab" data-tab="settings">설정</button>
     </div>
 
     <div class="admin-content">
@@ -63,6 +64,21 @@
       <div id="tab-models" class="tab-panel">
         <p class="models-description">모델 활성화/비활성화를 관리합니다. 비활성화된 모델은 사용자에게 표시되지 않습니다.</p>
         <div id="models-grid" class="models-grid"></div>
+      </div>
+
+      <!-- Settings Tab -->
+      <div id="tab-settings" class="tab-panel">
+        <p class="settings-description">사이트 전역 설정을 관리합니다.</p>
+        <div class="settings-form">
+          <div class="settings-row">
+            <label class="settings-label" for="setting-default-credits">신규 가입 기본 제공 크레딧</label>
+            <div class="settings-input-group">
+              <input type="number" id="setting-default-credits" min="0" max="10000" value="1">
+              <button id="save-settings-btn" class="settings-save-btn" onclick="saveSettings()">저장</button>
+            </div>
+            <p class="settings-hint">새로 가입하는 사용자에게 자동으로 지급되는 크레딧 수</p>
+          </div>
+        </div>
       </div>
 
       <!-- Conversations Tab -->

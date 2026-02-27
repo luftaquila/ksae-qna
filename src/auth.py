@@ -155,6 +155,16 @@ def init_db() -> None:
         """
     )
 
+    # Site settings key-value table
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS site_settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+
     # Migrate: add credits column to model_settings
     try:
         conn.execute("ALTER TABLE model_settings ADD COLUMN credits INTEGER")
@@ -163,6 +173,55 @@ def init_db() -> None:
 
     conn.commit()
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Site settings (key-value, in-memory cache)
+# ---------------------------------------------------------------------------
+_site_settings: dict[str, str] = {}
+
+_SITE_DEFAULTS: dict[str, str] = {
+    "default_credits": "1",
+}
+
+
+def init_site_settings() -> None:
+    """Load site_settings from DB into in-memory cache, filling defaults."""
+    _site_settings.clear()
+    _site_settings.update(_SITE_DEFAULTS)
+    conn = _get_conn()
+    rows = conn.execute("SELECT key, value FROM site_settings").fetchall()
+    conn.close()
+    for r in rows:
+        _site_settings[r["key"]] = r["value"]
+
+
+def get_site_setting(key: str) -> str:
+    return _site_settings.get(key, _SITE_DEFAULTS.get(key, ""))
+
+
+def set_site_setting(key: str, value: str) -> None:
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO site_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()
+    conn.close()
+    _site_settings[key] = value
+
+
+def get_default_credits() -> int:
+    """Return the configured default credits for new users."""
+    try:
+        return max(0, int(get_site_setting("default_credits")))
+    except (ValueError, TypeError):
+        return 1
+
+
+def get_all_site_settings() -> dict[str, str]:
+    """Return a copy of all current site settings."""
+    return dict(_site_settings)
 
 
 def get_model_settings_map() -> dict[str, dict]:
@@ -211,9 +270,10 @@ def get_or_create_user(
             ).fetchone()
         )
     else:
+        default_credits = get_default_credits()
         conn.execute(
-            "INSERT INTO users (google_id, email, name, picture) VALUES (?, ?, ?, ?)",
-            (google_id, email, name, picture),
+            "INSERT INTO users (google_id, email, name, picture, credits) VALUES (?, ?, ?, ?, ?)",
+            (google_id, email, name, picture, default_credits),
         )
         conn.commit()
         user = dict(

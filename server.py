@@ -25,6 +25,7 @@ from src.auth import (
     create_session,
     deduct_credit,
     delete_session,
+    get_all_site_settings,
     get_current_user,
     get_messages,
     get_or_create_user,
@@ -33,12 +34,14 @@ from src.auth import (
     init_admin_emails,
     init_db,
     init_oauth,
+    init_site_settings,
     is_admin,
     list_all_sessions,
     list_all_users,
     list_sessions,
     oauth,
     set_auth_cookie,
+    set_site_setting,
     update_session_title,
 )
 from src.chat import MODEL_CONFIG, get_all_models_admin, get_effective_credits, get_models, init_model_settings, init_resources, is_model_available, search_and_stream, set_model_admin_settings
@@ -71,6 +74,7 @@ async def lifespan(app: FastAPI):
     init_db()
     init_oauth()
     init_admin_emails()
+    init_site_settings()
     init_resources()
     init_model_settings()
     yield
@@ -119,6 +123,10 @@ class AdminCreditRequest(BaseModel):
 class ModelToggleRequest(BaseModel):
     enabled: bool
     credits: int | None = Field(default=None, ge=0)
+
+
+class SiteSettingsRequest(BaseModel):
+    default_credits: int = Field(..., ge=0, le=10000)
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +458,21 @@ async def admin_toggle_model(model_key: str, body: ModelToggleRequest, request: 
         return JSONResponse({"error": "존재하지 않는 모델입니다"}, status_code=404)
     set_model_admin_settings(model_key, body.enabled, body.credits)
     return {"ok": True, "model_key": model_key, "enabled": body.enabled, "credits": get_effective_credits(model_key)}
+
+
+@app.get("/api/admin/settings")
+async def admin_get_settings(request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    return {"settings": get_all_site_settings()}
+
+
+@app.patch("/api/admin/settings")
+async def admin_update_settings(body: SiteSettingsRequest, request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    set_site_setting("default_credits", str(body.default_credits))
+    return {"ok": True, "settings": get_all_site_settings()}
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
