@@ -86,6 +86,10 @@ function renderUsers(filter = "") {
         : "";
       const date = u.created_at ? formatLocal(u.created_at) : "";
       const lowClass = u.credits <= 2 ? " low" : "";
+      const totalIn = u.total_input_tokens || 0;
+      const totalOut = u.total_output_tokens || 0;
+      const totalThink = u.total_thinking_tokens || 0;
+      const cost = estimateCost(totalIn, totalOut, totalThink);
       return `<tr data-user-id="${u.id}">
         <td>${pic}${escapeHtml(u.name)}</td>
         <td>${escapeHtml(u.email)}</td>
@@ -96,6 +100,10 @@ function renderUsers(filter = "") {
             </div>
             <button class="credit-adjust-btn" onclick="showCreditEditor(${u.id}, ${u.credits})">조정</button>
           </div>
+        </td>
+        <td class="api-token-cell">
+          <span class="api-usage-chip">IN ${totalIn.toLocaleString()} / OUT ${totalOut.toLocaleString()} / THK ${totalThink.toLocaleString()}</span>
+          <span class="api-cost-chip">${cost}</span>
         </td>
         <td>${date}</td>
       </tr>`;
@@ -274,8 +282,9 @@ function renderSessionList(sessions) {
     .map((s) => {
       const date = s.updated_at ? formatLocal(s.updated_at) : "";
       const userName = s.user_name || "";
-      return `<div class="conv-session-item" data-session-id="${s.id}">
-        <div class="conv-session-title">${escapeHtml(s.title)}</div>
+      const deleted = s.deleted_at ? ' <span class="session-deleted-badge">삭제됨</span>' : "";
+      return `<div class="conv-session-item${s.deleted_at ? " deleted" : ""}" data-session-id="${s.id}">
+        <div class="conv-session-title">${escapeHtml(s.title)}${deleted}</div>
         <div class="conv-session-meta">${escapeHtml(userName)} &middot; ${date}</div>
       </div>`;
     })
@@ -344,9 +353,13 @@ async function loadMessages(sessionId) {
       footerEl.className = "admin-msg-footer";
       footerEl.innerHTML = `<span class="admin-msg-time">${time}</span>`;
       if (role === "assistant" && (msg.input_tokens || msg.output_tokens)) {
+        const msgIn = msg.input_tokens || 0;
+        const msgOut = msg.output_tokens || 0;
+        const msgThink = msg.thinking_tokens || 0;
+        const msgCost = estimateCost(msgIn, msgOut, msgThink);
         footerEl.innerHTML += `
-          <span class="token-usage-badge">IN <span>${msg.input_tokens || 0}</span></span>
-          <span class="token-usage-badge">OUT <span>${msg.output_tokens || 0}</span></span>`;
+          <span class="api-usage-chip small">IN ${msgIn.toLocaleString()} / OUT ${msgOut.toLocaleString()} / THK ${msgThink.toLocaleString()}</span>
+          <span class="api-cost-chip small">${msgCost}</span>`;
       }
       el.appendChild(footerEl);
 
@@ -392,6 +405,14 @@ function renderSources(container, sources) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+// Gemini 3 Flash pricing: $0.50/1M input, $3.00/1M output
+// Gemini 3 Flash: $0.50/1M input, $3.00/1M output, $3.00/1M thinking
+function estimateCost(inputTokens, outputTokens, thinkingTokens = 0) {
+  const cost = (inputTokens * 0.5 + outputTokens * 3.0 + thinkingTokens * 3.0) / 1_000_000;
+  if (cost < 0.01) return "$" + cost.toFixed(4);
+  return "$" + cost.toFixed(2);
+}
+
 function formatLocal(utcStr) {
   const d = new Date(utcStr + (utcStr.endsWith("Z") ? "" : "Z"));
   const yy = d.getFullYear();

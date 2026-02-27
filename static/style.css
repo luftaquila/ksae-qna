@@ -147,6 +147,14 @@ header h1 {
   color: var(--text-heading);
 }
 
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: inherit;
+}
+
 .header-logo {
   height: 24px;
   width: auto;
@@ -312,6 +320,15 @@ header h1 {
   height: 28px;
   border-radius: 50%;
   object-fit: cover;
+}
+
+.profile-admin-link {
+  display: flex;
+  cursor: pointer;
+}
+
+.profile-admin-link .profile-img {
+  border: 2px solid var(--color-primary);
 }
 
 .profile-name {

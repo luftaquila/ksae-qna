@@ -314,6 +314,20 @@
   background: var(--bg-sidebar-active);
 }
 
+.conv-session-item.deleted {
+  opacity: 0.5;
+}
+
+.session-deleted-badge {
+  font-size: 0.65rem;
+  color: var(--badge-low-color);
+  background: var(--badge-low-bg);
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
 .conv-session-title {
   font-size: 0.85rem;
   color: var(--text-primary);
@@ -405,6 +419,39 @@
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+.api-token-cell {
+  white-space: nowrap;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.api-usage-chip {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-sidebar);
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.api-cost-chip {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.api-usage-chip.small,
+.api-cost-chip.small {
+  font-size: 0.65rem;
+  padding: 2px 7px;
 }
 
 .token-usage-badge {

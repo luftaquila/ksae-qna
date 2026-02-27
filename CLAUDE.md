@@ -10,6 +10,7 @@ ksae-qna/
 ├── mcp_server.py          # MCP 프로토콜 기반 시맨틱 검색 서버 (stdin/stdout JSON-RPC)
 ├── server.py              # FastAPI 웹 챗봇 서버 (SSE 스트리밍)
 ├── Dockerfile             # Docker 컨테이너 빌드
+├── docker-compose.yml     # Docker Compose (Traefik 연동)
 ├── requirements.txt
 ├── .env                   # 환경 변수 (API 키 등)
 ├── .env.example           # 환경 변수 템플릿
@@ -37,7 +38,7 @@ ksae-qna/
 
 - **임베딩**: BAAI/bge-m3 (sentence-transformers), 1024차원 dense vector
 - **벡터 DB**: Qdrant (원격, HTTPS, JWT 인증), 코사인 유사도
-- **LLM**: Google Gemini 3 Flash (google-genai SDK, 스트리밍)
+- **LLM**: Google Gemini 3 Flash (google-genai SDK, 스트리밍, thinking=high)
 - **웹 서버**: FastAPI + uvicorn, SSE 스트리밍
 - **인증**: Google OAuth 2.0 + JWT 세션
 - **DB**: SQLite (users, sessions, messages, token_transactions)
@@ -60,6 +61,9 @@ python server.py                      # http://localhost:8000
 docker build -t pitbot .
 docker run -p 8000:8000 --env-file .env pitbot
 
+# Docker Compose (Traefik 리버스 프록시)
+docker compose up -d
+
 # MCP 서버 (Claude 등 AI 클라이언트용)
 python mcp_server.py                  # stdin/stdout JSON-RPC
 ```
@@ -75,6 +79,7 @@ python mcp_server.py                  # stdin/stdout JSON-RPC
 - `GOOGLE_CLIENT_SECRET` — Google OAuth 클라이언트 시크릿
 - `JWT_SECRET` — JWT 서명 시크릿 (선택, 기본값: "dev")
 - `ADMIN_EMAILS` — 관리자 이메일 (쉼표 구분, `/admin` 접근 권한)
+- `HTTPS_ONLY` — HTTPS 리버스 프록시 뒤에서 실행 시 `true` (세션/인증 쿠키 secure 설정)
 
 ## 코딩 컨벤션
 
@@ -88,7 +93,9 @@ python mcp_server.py                  # stdin/stdout JSON-RPC
 - 카테고리 드롭다운으로 Q&A 검색 시 Formula/Baja/EV 필터링 (Qdrant `FieldCondition` 사용)
 - 검색 시 선택된 컬렉션 각각에서 `limit`개씩 조회 후 score 순 병합, 상위 `limit`개 반환
 - `server.py`의 `min_score=0.5` 로 저품질 결과 필터링
-- 관리자 페이지 (`/admin`): 사용자 크레딧 관리, 대화 기록 열람, API 토큰 사용량 확인
+- 관리자 페이지 (`/admin`): 사용자 크레딧 관리, 대화 기록 열람, API 토큰 사용량(IN/OUT/THK) 및 비용 추산
+- 세션 삭제는 soft delete (`deleted_at` 컬럼) — 사용자에게는 숨기고 관리자는 열람 가능
+- API 토큰 비용 추산: Gemini 3 Flash 기준 $0.50/1M input, $3.00/1M output, $3.00/1M thinking
 - 날짜 표시는 UTC→로컬 변환, `YYYY-MM-DD HH:mm:ss` 형식
 
 ## 주의사항

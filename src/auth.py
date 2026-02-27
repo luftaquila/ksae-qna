@@ -125,11 +125,17 @@ def init_db() -> None:
     conn.commit()
 
     # Migrate: add token usage columns to messages
-    for col in ("input_tokens", "output_tokens"):
+    for col in ("input_tokens", "output_tokens", "thinking_tokens"):
         try:
             conn.execute(f"ALTER TABLE messages ADD COLUMN {col} INTEGER")
         except sqlite3.OperationalError:
             pass  # column already exists
+
+    # Migrate: add soft-delete column to sessions
+    try:
+        conn.execute("ALTER TABLE sessions ADD COLUMN deleted_at TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
 
     conn.commit()
     conn.close()
@@ -255,7 +261,7 @@ def set_auth_cookie(response: Response, token: str) -> None:
         path="/",
         httponly=True,
         samesite="lax",
-        secure=True,  # set True behind HTTPS reverse proxy
+        secure=os.environ.get("HTTPS_ONLY", "").lower() in ("1", "true"),
     )
 
 
@@ -293,7 +299,7 @@ def create_session(user_id: int, title: str = "새 대화") -> dict:
 def list_sessions(user_id: int) -> list[dict]:
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC", (user_id,)
+        "SELECT * FROM sessions WHERE user_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC", (user_id,)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -302,16 +308,18 @@ def list_sessions(user_id: int) -> list[dict]:
 def get_session(session_id: int, user_id: int) -> dict | None:
     conn = _get_conn()
     row = conn.execute(
-        "SELECT * FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id)
+        "SELECT * FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL", (session_id, user_id)
     ).fetchone()
     conn.close()
     return dict(row) if row else None
 
 
 def delete_session(session_id: int, user_id: int) -> bool:
+    """Soft-delete: set deleted_at so the session is hidden from the user but preserved for admin."""
     conn = _get_conn()
     cur = conn.execute(
-        "DELETE FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id)
+        "UPDATE sessions SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+        (session_id, user_id),
     )
     conn.commit()
     deleted = cur.rowcount > 0
@@ -338,11 +346,12 @@ def add_message(
     sources: str | None = None,
     input_tokens: int | None = None,
     output_tokens: int | None = None,
+    thinking_tokens: int | None = None,
 ) -> dict:
     conn = _get_conn()
     cur = conn.execute(
-        "INSERT INTO messages (session_id, role, content, sources, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?)",
-        (session_id, role, content, sources, input_tokens, output_tokens),
+        "INSERT INTO messages (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens),
     )
     conn.execute(
         "UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", (session_id,)
@@ -366,10 +375,21 @@ def get_messages(session_id: int) -> list[dict]:
 # Admin queries
 # ---------------------------------------------------------------------------
 def list_all_users() -> list[dict]:
-    """Return all users ordered by created_at DESC."""
+    """Return all users with aggregate API token usage, ordered by created_at DESC."""
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT id, google_id, email, name, picture, credits, created_at, updated_at FROM users ORDER BY created_at DESC"
+        """
+        SELECT u.id, u.google_id, u.email, u.name, u.picture, u.credits,
+               u.created_at, u.updated_at,
+               COALESCE(SUM(m.input_tokens), 0) AS total_input_tokens,
+               COALESCE(SUM(m.output_tokens), 0) AS total_output_tokens,
+               COALESCE(SUM(m.thinking_tokens), 0) AS total_thinking_tokens
+        FROM users u
+        LEFT JOIN sessions s ON s.user_id = u.id
+        LEFT JOIN messages m ON m.session_id = s.id AND m.role = 'assistant'
+        GROUP BY u.id
+        ORDER BY u.created_at DESC
+        """
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]

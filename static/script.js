@@ -55,9 +55,12 @@ function renderAuthUI() {
     queryInput.disabled = false;
     sendBtn.disabled = false;
 
-    const img = currentUser.picture
+    const imgTag = currentUser.picture
       ? `<img src="${escapeAttr(currentUser.picture)}" class="profile-img" alt="" referrerpolicy="no-referrer">`
       : "";
+    const img = currentUser.is_admin
+      ? `<a href="/admin" class="profile-admin-link" title="관리자 페이지">${imgTag}</a>`
+      : imgTag;
     const lowClass = currentUser.credits <= 2 ? " low" : "";
 
     authArea.innerHTML = `

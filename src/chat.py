@@ -174,6 +174,7 @@ async def search_and_stream(
 
     input_tokens = 0
     output_tokens = 0
+    thinking_tokens = 0
 
     try:
         response = _gemini.models.generate_content_stream(
@@ -183,6 +184,7 @@ async def search_and_stream(
                 system_instruction=SYSTEM_PROMPT,
                 temperature=0.3,
                 max_output_tokens=4096,
+                thinking_config=types.ThinkingConfig(thinking_level="high"),
             ),
         )
 
@@ -199,15 +201,17 @@ async def search_and_stream(
             # Capture usage metadata from the last chunk
             if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
                 um = chunk.usage_metadata
-                if hasattr(um, "prompt_token_count") and um.prompt_token_count:
+                if hasattr(um, "prompt_token_count") and um.prompt_token_count is not None:
                     input_tokens = um.prompt_token_count
-                if hasattr(um, "candidates_token_count") and um.candidates_token_count:
+                if hasattr(um, "candidates_token_count") and um.candidates_token_count is not None:
                     output_tokens = um.candidates_token_count
+                if hasattr(um, "thoughts_token_count") and um.thoughts_token_count is not None:
+                    thinking_tokens = um.thoughts_token_count
     except Exception as e:
         error_msg = json.dumps(f"LLM 호출 오류: {e}", ensure_ascii=False)
         yield f"event: token\ndata: {error_msg}\n\n"
 
     # Send usage metadata before done
-    usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens})
+    usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens, "thinking_tokens": thinking_tokens})
     yield f"event: usage\ndata: {usage_data}\n\n"
     yield "event: done\ndata: {}\n\n"

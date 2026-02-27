@@ -54,7 +54,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(SessionMiddleware, secret_key=os.environ.get("JWT_SECRET", "dev"), https_only=True)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("JWT_SECRET", "dev"),
+    https_only=os.environ.get("HTTPS_ONLY", "").lower() in ("1", "true"),
+)
 
 
 @app.middleware("http")
@@ -147,6 +151,7 @@ async def me(request: Request):
             "name": user["name"],
             "picture": user["picture"],
             "credits": user["credits"],
+            "is_admin": is_admin(request) is not None,
         }
     }
 
@@ -268,34 +273,36 @@ async def chat(request: Request, req: ChatRequest):
         sources_json = None
         input_tokens = None
         output_tokens = None
+        thinking_tokens = None
 
         async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections, category=req.category):
             yield event
 
             # Collect data for persistence
-            for line in event.strip().split("\n"):
-                if line.startswith("event: sources"):
-                    pass  # next data line has the sources
-                elif line.startswith("data: ") and sources_json is None and "sources" in event:
-                    try:
-                        sources_json = line[6:]
-                    except Exception:
-                        pass
-                elif line.startswith("data: ") and "token" in event:
-                    try:
-                        full_text += json.loads(line[6:])
-                    except Exception:
-                        pass
-                elif line.startswith("data: ") and "usage" in event:
-                    try:
-                        usage = json.loads(line[6:])
-                        input_tokens = usage.get("input_tokens")
-                        output_tokens = usage.get("output_tokens")
-                    except Exception:
-                        pass
+            if event.startswith("event: sources"):
+                try:
+                    data_line = event.split("\n")[1]
+                    sources_json = data_line[6:]
+                except Exception:
+                    pass
+            elif event.startswith("event: token"):
+                try:
+                    data_line = event.split("\n")[1]
+                    full_text += json.loads(data_line[6:])
+                except Exception:
+                    pass
+            elif event.startswith("event: usage"):
+                try:
+                    data_line = event.split("\n")[1]
+                    usage = json.loads(data_line[6:])
+                    input_tokens = usage.get("input_tokens")
+                    output_tokens = usage.get("output_tokens")
+                    thinking_tokens = usage.get("thinking_tokens")
+                except Exception:
+                    pass
 
         # Persist assistant message
-        add_message(session_id, "assistant", full_text, sources_json, input_tokens, output_tokens)
+        add_message(session_id, "assistant", full_text, sources_json, input_tokens, output_tokens, thinking_tokens)
 
         # Send session_id to client
         yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
