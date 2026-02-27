@@ -184,7 +184,7 @@ async def me(request: Request):
     user = get_current_user(request)
     if not user:
         return JSONResponse({"user": None}, status_code=200)
-    low_threshold = 2
+    low_threshold = 5
     try:
         low_threshold = max(0, int(get_site_setting("low_credit_threshold")))
     except (ValueError, TypeError):

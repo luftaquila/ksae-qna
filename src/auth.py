@@ -81,7 +81,7 @@ def init_db() -> None:
             email       TEXT    NOT NULL,
             name        TEXT    NOT NULL,
             picture     TEXT,
-            credits     INTEGER NOT NULL DEFAULT 1,
+            credits     INTEGER NOT NULL DEFAULT 15,
             created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
             updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
         )
@@ -181,8 +181,8 @@ def init_db() -> None:
 _site_settings: dict[str, str] = {}
 
 _SITE_DEFAULTS: dict[str, str] = {
-    "default_credits": "1",
-    "low_credit_threshold": "2",
+    "default_credits": "15",
+    "low_credit_threshold": "5",
 }
 
 

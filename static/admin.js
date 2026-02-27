@@ -8,7 +8,7 @@ const convMessages = document.getElementById("conv-messages");
 let allUsers = [];
 let allModels = [];
 let currentConvSessionId = null;
-let lowCreditThreshold = 2;
+let lowCreditThreshold = 5;
 
 // ---------------------------------------------------------------------------
 // Theme (reused from script.js)
@@ -641,7 +641,7 @@ async function loadSettings() {
     const thresholdInput = document.getElementById("setting-low-credit-threshold");
     if (thresholdInput && settings.low_credit_threshold !== undefined) {
       thresholdInput.value = settings.low_credit_threshold;
-      lowCreditThreshold = parseInt(settings.low_credit_threshold, 10) || 2;
+      lowCreditThreshold = parseInt(settings.low_credit_threshold, 10) || 5;
     }
   } catch {
     // ignore

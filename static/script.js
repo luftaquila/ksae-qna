@@ -13,7 +13,7 @@ const sidebarOverlay = document.getElementById("sidebar-overlay");
 let currentUser = null;
 let currentSessionId = null;
 let availableModels = [];
-let lowCreditThreshold = 2;
+let lowCreditThreshold = 5;
 
 // ---------------------------------------------------------------------------
 // Mobile sidebar
