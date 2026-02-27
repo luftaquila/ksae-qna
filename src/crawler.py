@@ -463,23 +463,19 @@ def crawl_all_details(
     posts: list[dict[str, Any]] = []
     reply_numbers: set[int] = set()
 
-    # First pass: identify reply posts and map them to their question
-    # Reply posts appear after the question with the same title.
-    # We iterate in list order (descending post id) and for each reply,
-    # look for the question immediately after it (next in list = earlier post).
-    question_answer_map: dict[int, int] = {}  # question number -> reply number
+    # First pass: identify reply posts and map them to their question.
+    # Reply posts appear after the question in the list. A question may
+    # have multiple replies, so we look backward past other replies to
+    # find the parent question post.
+    question_answer_map: dict[int, list[int]] = {}  # question number -> reply numbers
     for i, meta in enumerate(post_list):
         if meta["is_reply"]:
             reply_numbers.add(meta["number"])
-            # The question is the next entry in the list (which has a higher number
-            # since the list is sorted descending by id, and the reply appears first)
-            # Actually: reply posts appear AFTER the question in the list
-            # (lower post id = earlier in list order which is descending).
-            # Let's look at the previous entry.
-            if i > 0:
-                prev = post_list[i - 1]
-                if not prev["is_reply"]:
-                    question_answer_map[prev["number"]] = meta["number"]
+            # Look backward for the nearest non-reply (question) post
+            for j in range(i - 1, -1, -1):
+                if not post_list[j]["is_reply"]:
+                    question_answer_map.setdefault(post_list[j]["number"], []).append(meta["number"])
+                    break
 
     # Second pass: build output posts
     for meta in post_list:
@@ -492,21 +488,32 @@ def crawl_all_details(
             continue
 
         question_body = detail["body"]
-        answer_body = ""
+        answer_parts: list[str] = []
+
+        # Collect answer bodies from all reply posts
+        reply_nums = question_answer_map.get(number, [])
+        last_reply_number: int | None = None
+        for reply_number in reply_nums:
+            if reply_number in detail_map:
+                reply_detail = detail_map[reply_number]
+                raw_answer = reply_detail["body"]
+                # The reply body includes the original question after a separator.
+                # Extract only the answer part (before the separator).
+                separator_pattern = r"={10,}\s*원\s*글\s*={10,}"
+                parts = re.split(separator_pattern, raw_answer, maxsplit=1)
+                cleaned = _clean_text(parts[0])
+                if cleaned:
+                    answer_parts.append(cleaned)
+                last_reply_number = reply_number
+
+        answer_body = "\n\n".join(answer_parts)
         comments: list[str] = []
 
-        # Check if this question has an answer post
-        reply_number = question_answer_map.get(number)
-        if reply_number and reply_number in detail_map:
-            reply_detail = detail_map[reply_number]
-            raw_answer = reply_detail["body"]
-            # The reply body includes the original question after a separator.
-            # Extract only the answer part (before the separator).
-            separator_pattern = r"={10,}\s*원\s*글\s*={10,}"
-            parts = re.split(separator_pattern, raw_answer, maxsplit=1)
-            answer_body = _clean_text(parts[0])
-
-        url = f"{BASE_URL}{meta['detail_url']}"
+        # Use last reply (answer) URL if available, so "원문 보기" links to the answer page
+        if last_reply_number and last_reply_number in detail_map:
+            url = f"{BASE_URL}/jajak/bbs/?number={last_reply_number}&mode=view&code=J_qna"
+        else:
+            url = f"{BASE_URL}{meta['detail_url']}"
         post_data: dict[str, Any] = {
             "id": meta["id"],
             "category": meta["category"],
