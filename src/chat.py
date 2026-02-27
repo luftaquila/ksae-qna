@@ -56,15 +56,15 @@ MODEL_CONFIG = {
         "model_id": "claude-sonnet-4-6-20250514",
         "label": "Claude Sonnet 4.6",
         "credits": 5,
-        "thinking_level": None,
-        "pricing": {"input": 3.00, "output": 15.00, "thinking": 0},
+        "thinking_level": "high",
+        "pricing": {"input": 3.00, "output": 15.00, "thinking": 15.00},
     },
     "claude-opus-4.6": {
         "provider": "anthropic",
         "model_id": "claude-opus-4-6-20250514",
         "label": "Claude Opus 4.6",
         "credits": 10,
-        "thinking_level": "high",
+        "thinking_level": "max",
         "pricing": {"input": 5.00, "output": 25.00, "thinking": 25.00},
     },
 }
@@ -348,13 +348,15 @@ async def _stream_anthropic(
     try:
         kwargs: dict = {
             "model": model_config["model_id"],
-            "max_tokens": 4096,
+            "max_tokens": 128000,
             "system": SYSTEM_PROMPT,
             "messages": messages,
         }
 
         if model_config["thinking_level"]:
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": 8192}
+            # Use adaptive thinking (recommended for Opus 4.6 / Sonnet 4.6)
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {"effort": model_config["thinking_level"]}
             kwargs["temperature"] = 1  # required for extended thinking
 
         async with _anthropic.messages.stream(**kwargs) as stream:
@@ -369,16 +371,10 @@ async def _stream_anthropic(
             input_tokens = response.usage.input_tokens
             output_tokens = response.usage.output_tokens
 
-            # Count thinking tokens from thinking content blocks
-            for block in response.content:
-                if block.type == "thinking":
-                    # Anthropic doesn't provide thinking token counts directly in content blocks;
-                    # but the usage object may have it
-                    pass
-
-            # Check for thinking tokens in usage (Anthropic may include cache_creation_input_tokens etc.)
-            if hasattr(response.usage, "cache_read_input_tokens"):
-                pass  # just ignore cache tokens for now
+            # Thinking tokens are included in output_tokens for billing,
+            # but may be available separately via usage metadata
+            if hasattr(response.usage, "thinking_tokens"):
+                thinking_tokens = response.usage.thinking_tokens
 
     except Exception as e:
         logger.exception("Anthropic streaming error: %s", e)

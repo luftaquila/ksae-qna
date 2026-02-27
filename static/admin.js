@@ -593,7 +593,7 @@ window.saveSettings = async function () {
 const MODEL_PRICING = {
   "gemini-3-flash":    { input: 0.50, output: 3.00,  thinking: 3.00 },
   "gemini-3-pro":      { input: 2.50, output: 15.00, thinking: 15.00 },
-  "claude-sonnet-4.6": { input: 3.00, output: 15.00, thinking: 0 },
+  "claude-sonnet-4.6": { input: 3.00, output: 15.00, thinking: 15.00 },
   "claude-opus-4.6":   { input: 5.00, output: 25.00, thinking: 25.00 },
 };
 
