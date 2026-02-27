@@ -47,7 +47,7 @@ from src.auth import (
     set_site_setting,
     update_session_title,
 )
-from src.chat import MODEL_CONFIG, get_all_models_admin, get_effective_credits, get_models, init_model_settings, init_resources, is_model_available, search_and_stream, set_model_admin_settings
+from src.chat import MODEL_CONFIG, get_all_models_admin, get_effective_credits, get_models, init_model_settings, init_resources, is_model_available, search_and_stream, set_model_admin_settings, set_model_display_order
 
 load_dotenv()
 
@@ -479,6 +479,22 @@ async def admin_toggle_model(model_key: str, body: ModelToggleRequest, request: 
         return JSONResponse({"error": "존재하지 않는 모델입니다"}, status_code=404)
     set_model_admin_settings(model_key, body.enabled, body.credits)
     return {"ok": True, "model_key": model_key, "enabled": body.enabled, "credits": get_effective_credits(model_key)}
+
+
+class ModelOrderRequest(BaseModel):
+    order: list[str]
+
+
+@app.put("/api/admin/models/order")
+async def admin_set_model_order(body: ModelOrderRequest, request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    # Validate all keys exist
+    for key in body.order:
+        if key not in MODEL_CONFIG:
+            return JSONResponse({"error": f"존재하지 않는 모델: {key}"}, status_code=400)
+    set_model_display_order(body.order)
+    return {"ok": True, "order": body.order}
 
 
 @app.get("/api/admin/settings")

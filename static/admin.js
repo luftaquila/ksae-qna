@@ -573,7 +573,7 @@ function renderModels() {
   const grid = document.getElementById("models-grid");
   if (!grid) return;
 
-  grid.innerHTML = allModels.map((m) => {
+  grid.innerHTML = allModels.map((m, idx) => {
     const providerLabel = m.provider === "gemini" ? "Google Gemini" : "Anthropic";
     const providerStatus = m.provider_available
       ? `<span class="model-provider-status connected">연결됨</span>`
@@ -584,29 +584,121 @@ function renderModels() {
     const resetBtn = isCustom
       ? `<button class="model-credits-reset" onclick="resetModelCredits('${m.id}')" title="기본값(${m.default_credits})으로 초기화">초기화</button>`
       : "";
-    return `<div class="model-card${m.available ? "" : " unavailable"}">
-      <div class="model-card-header">
-        <span class="model-card-label">${escapeHtml(m.label)}</span>
-      </div>
-      <div class="model-card-provider">
-        <span class="model-card-provider-name">${providerLabel}</span>
-        ${providerStatus}
-      </div>
-      <div class="model-card-credits-row">
-        <label class="model-credits-label">차감 크레딧</label>
-        <input type="number" class="model-credits-input" min="0" value="${m.credits}"
-          data-model="${m.id}" onchange="updateModelCredits('${m.id}', this.value)">
-        ${resetBtn}
-      </div>
-      <div class="model-card-toggle">
-        <label class="toggle-switch">
-          <input type="checkbox" ${checked} ${disabled} onchange="toggleModel('${m.id}', this.checked)">
-          <span class="toggle-slider"></span>
-        </label>
-        <span class="toggle-label">${m.admin_enabled ? "활성" : "비활성"}</span>
+    const defaultBadge = idx === 0 ? `<span class="model-default-badge">기본</span>` : "";
+    return `<div class="model-card${m.available ? "" : " unavailable"}" draggable="true" data-model-id="${m.id}">
+      <div class="model-drag-handle" title="드래그하여 순서 변경">⠿</div>
+      <div class="model-card-body">
+        <div class="model-card-header">
+          <span class="model-card-label">${escapeHtml(m.label)}</span>
+          ${defaultBadge}
+        </div>
+        <div class="model-card-provider">
+          <span class="model-card-provider-name">${providerLabel}</span>
+          ${providerStatus}
+        </div>
+        <div class="model-card-credits-row">
+          <label class="model-credits-label">차감 크레딧</label>
+          <input type="number" class="model-credits-input" min="0" value="${m.credits}"
+            data-model="${m.id}" onchange="updateModelCredits('${m.id}', this.value)">
+          ${resetBtn}
+        </div>
+        <div class="model-card-toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" ${checked} ${disabled} onchange="toggleModel('${m.id}', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label">${m.admin_enabled ? "활성" : "비활성"}</span>
+        </div>
       </div>
     </div>`;
   }).join("");
+
+  initModelDragAndDrop();
+}
+
+// ---------------------------------------------------------------------------
+// Model drag-and-drop reordering
+// ---------------------------------------------------------------------------
+let dragSrcEl = null;
+
+function initModelDragAndDrop() {
+  const grid = document.getElementById("models-grid");
+  if (!grid) return;
+
+  const cards = grid.querySelectorAll(".model-card");
+  cards.forEach((card) => {
+    card.addEventListener("dragstart", handleDragStart);
+    card.addEventListener("dragover", handleDragOver);
+    card.addEventListener("dragenter", handleDragEnter);
+    card.addEventListener("dragleave", handleDragLeave);
+    card.addEventListener("drop", handleDrop);
+    card.addEventListener("dragend", handleDragEnd);
+  });
+}
+
+function handleDragStart(e) {
+  dragSrcEl = this;
+  this.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", this.dataset.modelId);
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+}
+
+function handleDragEnter(e) {
+  e.preventDefault();
+  const card = e.target.closest(".model-card");
+  if (card && card !== dragSrcEl) {
+    card.classList.add("drag-over");
+  }
+}
+
+function handleDragLeave(e) {
+  const card = e.target.closest(".model-card");
+  if (card) {
+    card.classList.remove("drag-over");
+  }
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  const targetCard = e.target.closest(".model-card");
+  if (!targetCard || targetCard === dragSrcEl) return;
+
+  targetCard.classList.remove("drag-over");
+
+  const grid = document.getElementById("models-grid");
+  const cards = [...grid.querySelectorAll(".model-card")];
+  const fromIdx = cards.indexOf(dragSrcEl);
+  const toIdx = cards.indexOf(targetCard);
+
+  // Reorder allModels array
+  const [moved] = allModels.splice(fromIdx, 1);
+  allModels.splice(toIdx, 0, moved);
+
+  renderModels();
+  saveModelOrder();
+}
+
+function handleDragEnd() {
+  this.classList.remove("dragging");
+  document.querySelectorAll(".model-card").forEach((c) => c.classList.remove("drag-over"));
+}
+
+async function saveModelOrder() {
+  const order = allModels.map((m) => m.id);
+  try {
+    await fetch("/api/admin/models/order", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order }),
+    });
+  } catch {
+    // Silently fail — order is already applied visually
+  }
 }
 
 window.toggleModel = async function (modelKey, enabled) {

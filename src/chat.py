@@ -16,7 +16,7 @@ from google.genai import types
 from qdrant_client import QdrantClient, models
 from sentence_transformers import SentenceTransformer
 
-from src.auth import get_model_settings_map, set_model_settings
+from src.auth import get_model_settings_map, set_model_order as _db_set_model_order, set_model_settings
 
 # Globals initialized once at server startup
 _model: SentenceTransformer | None = None
@@ -26,6 +26,7 @@ _anthropic: anthropic.AsyncAnthropic | None = None
 
 _model_enabled: dict[str, bool] = {}
 _model_credits: dict[str, int | None] = {}
+_model_order: dict[str, int] = {}  # model_key -> display_order
 
 EMBEDDING_MODEL = "BAAI/bge-m3"
 COLLECTIONS = {
@@ -127,6 +128,8 @@ def init_model_settings() -> None:
     for key, val in settings.items():
         _model_enabled[key] = val["enabled"]
         _model_credits[key] = val["credits"]
+        if val["display_order"] is not None:
+            _model_order[key] = val["display_order"]
 
 
 def set_model_admin_settings(model_key: str, enabled: bool, credits: int | None = None) -> None:
@@ -134,6 +137,14 @@ def set_model_admin_settings(model_key: str, enabled: bool, credits: int | None 
     set_model_settings(model_key, enabled, credits)
     _model_enabled[model_key] = enabled
     _model_credits[model_key] = credits
+
+
+def set_model_display_order(order: list[str]) -> None:
+    """Update display order in both DB and in-memory cache."""
+    _db_set_model_order(order)
+    _model_order.clear()
+    for idx, key in enumerate(order):
+        _model_order[key] = idx
 
 
 def get_effective_credits(model_key: str) -> int:
@@ -158,10 +169,15 @@ def is_model_available(model: str) -> bool:
     return False
 
 
+def _sort_key(model_key: str, idx: int) -> int:
+    """Return display order for sorting; fall back to dict insertion index."""
+    return _model_order.get(model_key, idx)
+
+
 def get_models() -> list[dict]:
-    """Return all models with availability status."""
+    """Return all models with availability status, sorted by display order."""
     result = []
-    for model_key, cfg in MODEL_CONFIG.items():
+    for idx, (model_key, cfg) in enumerate(MODEL_CONFIG.items()):
         admin_enabled = _model_enabled.get(model_key, True)
         provider_ok = True
         if cfg["provider"] == "gemini" and _gemini is None:
@@ -175,14 +191,18 @@ def get_models() -> list[dict]:
             "credits": get_effective_credits(model_key),
             "pricing": cfg["pricing"],
             "available": available,
+            "_order": _sort_key(model_key, idx),
         })
+    result.sort(key=lambda x: x["_order"])
+    for r in result:
+        del r["_order"]
     return result
 
 
 def get_all_models_admin() -> list[dict]:
-    """Return all models with provider_available, admin_enabled, and available status."""
+    """Return all models with provider_available, admin_enabled, and available status, sorted by display order."""
     result = []
-    for model_key, cfg in MODEL_CONFIG.items():
+    for idx, (model_key, cfg) in enumerate(MODEL_CONFIG.items()):
         if cfg["provider"] == "gemini":
             provider_available = _gemini is not None
         elif cfg["provider"] == "anthropic":
@@ -201,7 +221,11 @@ def get_all_models_admin() -> list[dict]:
             "provider_available": provider_available,
             "admin_enabled": admin_enabled,
             "available": provider_available and admin_enabled,
+            "_order": _sort_key(model_key, idx),
         })
+    result.sort(key=lambda x: x["_order"])
+    for r in result:
+        del r["_order"]
     return result
 
 

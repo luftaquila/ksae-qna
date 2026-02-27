@@ -171,6 +171,12 @@ def init_db() -> None:
     except sqlite3.OperationalError:
         pass  # column already exists
 
+    # Migrate: add display_order column to model_settings
+    try:
+        conn.execute("ALTER TABLE model_settings ADD COLUMN display_order INTEGER")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
     conn.commit()
     conn.close()
 
@@ -226,11 +232,11 @@ def get_all_site_settings() -> dict[str, str]:
 
 
 def get_model_settings_map() -> dict[str, dict]:
-    """Return {model_key: {"enabled": bool, "credits": int|None}} for all rows."""
+    """Return {model_key: {"enabled": bool, "credits": int|None, "display_order": int|None}} for all rows."""
     conn = _get_conn()
-    rows = conn.execute("SELECT model_key, enabled, credits FROM model_settings").fetchall()
+    rows = conn.execute("SELECT model_key, enabled, credits, display_order FROM model_settings").fetchall()
     conn.close()
-    return {r["model_key"]: {"enabled": bool(r["enabled"]), "credits": r["credits"]} for r in rows}
+    return {r["model_key"]: {"enabled": bool(r["enabled"]), "credits": r["credits"], "display_order": r["display_order"]} for r in rows}
 
 
 def set_model_settings(model_key: str, enabled: bool, credits: int | None = None) -> None:
@@ -247,6 +253,24 @@ def set_model_settings(model_key: str, enabled: bool, credits: int | None = None
         """,
         (model_key, int(enabled), credits),
     )
+    conn.commit()
+    conn.close()
+
+
+def set_model_order(order: list[str]) -> None:
+    """Update display_order for all models in the given order list."""
+    conn = _get_conn()
+    for idx, model_key in enumerate(order):
+        conn.execute(
+            """
+            INSERT INTO model_settings (model_key, enabled, display_order, updated_at)
+            VALUES (?, 1, ?, datetime('now'))
+            ON CONFLICT(model_key) DO UPDATE SET
+                display_order = excluded.display_order,
+                updated_at = excluded.updated_at
+            """,
+            (model_key, idx),
+        )
     conn.commit()
     conn.close()
 
