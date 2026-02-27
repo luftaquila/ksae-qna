@@ -1,10 +1,21 @@
 services:
   pitbot:
     build: .
-    ports:
-      - "8000:8000"
     env_file:
       - .env
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.pitbot.rule=Host(`pitbot.luftaquila.io`)
+      - traefik.http.routers.pitbot.entrypoints=websecure
+      - traefik.http.routers.pitbot.tls=true
+      - traefik.http.routers.pitbot.tls.certresolver=le
+      - traefik.http.services.pitbot.loadbalancer.server.port=8000
+    networks:
+      - traefik
+
+networks:
+  traefik:
+    external: true

@@ -54,7 +54,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(SessionMiddleware, secret_key=os.environ.get("JWT_SECRET", "dev"))
+app.add_middleware(SessionMiddleware, secret_key=os.environ.get("JWT_SECRET", "dev"), https_only=True)
+
+
+@app.middleware("http")
+async def fix_request_scheme(request: Request, call_next):
+    """
+    Ensure request.url_for uses https if the app is behind an HTTPS reverse proxy.
+    """
+    if request.headers.get("x-forwarded-proto") == "https":
+        request.scope["scheme"] = "https"
+    return await call_next(request)
 
 
 class ChatRequest(BaseModel):
@@ -92,6 +102,8 @@ async def index():
 @app.get("/api/auth/login")
 async def auth_login(request: Request):
     redirect_uri = request.url_for("auth_callback")
+    if request.headers.get("x-forwarded-proto") == "https":
+        redirect_uri = str(redirect_uri).replace("http://", "https://")
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 

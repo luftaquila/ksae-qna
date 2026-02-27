@@ -255,7 +255,7 @@ def set_auth_cookie(response: Response, token: str) -> None:
         path="/",
         httponly=True,
         samesite="lax",
-        secure=False,  # set True behind HTTPS reverse proxy
+        secure=True,  # set True behind HTTPS reverse proxy
     )
 
 
