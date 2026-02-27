@@ -380,38 +380,45 @@ form.addEventListener("submit", async (e) => {
     let buffer = "";
     let fullText = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop();
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
 
-      let eventType = null;
-      for (const line of lines) {
-        if (line.startsWith("event: ")) {
-          eventType = line.slice(7);
-        } else if (line.startsWith("data: ")) {
-          const data = line.slice(6);
+        let eventType = null;
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7);
+          } else if (line.startsWith("data: ")) {
+            const data = line.slice(6);
 
-          if (eventType === "session") {
-            try {
-              const payload = JSON.parse(data);
-              if (payload.session_id) {
-                currentSessionId = payload.session_id;
-                loadSessions();
+            if (eventType === "session") {
+              try {
+                const payload = JSON.parse(data);
+                if (payload.session_id) {
+                  currentSessionId = payload.session_id;
+                  loadSessions();
+                }
+              } catch {}
+            } else {
+              handleEvent(eventType, data, sourcesContainer, answerEl, { fullText });
+              if (eventType === "token") {
+                try { fullText += JSON.parse(data); } catch {}
               }
-            } catch {}
-          } else {
-            handleEvent(eventType, data, sourcesContainer, answerEl, { fullText });
-            if (eventType === "token") {
-              try { fullText += JSON.parse(data); } catch {}
             }
+            eventType = null;
           }
-          eventType = null;
         }
       }
+    } catch (streamErr) {
+      // Network error during streaming (e.g. app switch on mobile)
+      // Preserve partial text if available
+      if (!fullText) throw streamErr;
+      fullText += "\n\n---\n*연결이 끊어져 응답이 중단되었습니다.*";
     }
 
     // Final render

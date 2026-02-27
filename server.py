@@ -2,10 +2,14 @@
 FastAPI server for KSAE Q&A chatbot.
 """
 
+import asyncio
 import json
+import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -99,6 +103,10 @@ async def fix_request_scheme(request: Request, call_next):
     if request.headers.get("x-forwarded-proto") == "https":
         request.scope["scheme"] = "https"
     return await call_next(request)
+
+
+# Prevent background LLM tasks from being garbage-collected
+_background_tasks: set[asyncio.Task] = set()
 
 
 class ChatRequest(BaseModel):
@@ -331,7 +339,12 @@ async def chat(request: Request, req: ChatRequest):
     if req.session_id and session["title"] == "새 대화":
         update_session_title(session_id, user["id"], req.query[:50])
 
-    async def stream_and_persist():
+    # Decouple LLM consumption from client delivery via a queue.
+    # If the client disconnects, the LLM task keeps running in the background
+    # so the full response is persisted and visible when the user returns.
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def consume_llm():
         full_text = ""
         sources_json = None
         input_tokens = None
@@ -339,49 +352,65 @@ async def chat(request: Request, req: ChatRequest):
         thinking_tokens = None
         has_error = False
 
-        async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections, category=req.category, model=req.model):
-            # Forward error events as token events so the client displays them
-            if event.startswith("event: error"):
-                has_error = True
-                yield event.replace("event: error", "event: token", 1)
-            else:
+        try:
+            async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections, category=req.category, model=req.model):
+                # Forward error events as token events so the client displays them
+                if event.startswith("event: error"):
+                    has_error = True
+                    await queue.put(event.replace("event: error", "event: token", 1))
+                else:
+                    await queue.put(event)
+
+                # Collect data for persistence
+                if event.startswith("event: sources"):
+                    try:
+                        data_line = event.split("\n")[1]
+                        sources_json = data_line[6:]
+                    except Exception:
+                        pass
+                elif event.startswith("event: token"):
+                    try:
+                        data_line = event.split("\n")[1]
+                        full_text += json.loads(data_line[6:])
+                    except Exception:
+                        pass
+                elif event.startswith("event: usage"):
+                    try:
+                        data_line = event.split("\n")[1]
+                        usage = json.loads(data_line[6:])
+                        input_tokens = usage.get("input_tokens")
+                        output_tokens = usage.get("output_tokens")
+                        thinking_tokens = usage.get("thinking_tokens")
+                    except Exception:
+                        pass
+        except Exception:
+            logger.exception("LLM streaming error in background task")
+        finally:
+            if has_error:
+                refund_credit(user["id"], credits_needed, f"오류 환불 ({model_label})")
+
+            add_message(session_id, "assistant", full_text, sources_json, input_tokens, output_tokens, thinking_tokens, model=req.model)
+
+            await queue.put(f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n")
+            await queue.put(None)  # sentinel: stream finished
+
+    task = asyncio.create_task(consume_llm())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    async def sse_generator():
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
                 yield event
-
-            # Collect data for persistence
-            if event.startswith("event: sources"):
-                try:
-                    data_line = event.split("\n")[1]
-                    sources_json = data_line[6:]
-                except Exception:
-                    pass
-            elif event.startswith("event: token"):
-                try:
-                    data_line = event.split("\n")[1]
-                    full_text += json.loads(data_line[6:])
-                except Exception:
-                    pass
-            elif event.startswith("event: usage"):
-                try:
-                    data_line = event.split("\n")[1]
-                    usage = json.loads(data_line[6:])
-                    input_tokens = usage.get("input_tokens")
-                    output_tokens = usage.get("output_tokens")
-                    thinking_tokens = usage.get("thinking_tokens")
-                except Exception:
-                    pass
-
-        # Refund credits on LLM error
-        if has_error:
-            refund_credit(user["id"], credits_needed, f"오류 환불 ({model_label})")
-
-        # Persist assistant message
-        add_message(session_id, "assistant", full_text, sources_json, input_tokens, output_tokens, thinking_tokens, model=req.model)
-
-        # Send session_id to client
-        yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected — LLM task continues in background
+            pass
 
     return StreamingResponse(
-        stream_and_persist(),
+        sse_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
