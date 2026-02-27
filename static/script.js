@@ -13,6 +13,7 @@ const sidebarOverlay = document.getElementById("sidebar-overlay");
 let currentUser = null;
 let currentSessionId = null;
 let availableModels = [];
+let lowCreditThreshold = 2;
 
 // ---------------------------------------------------------------------------
 // Mobile sidebar
@@ -42,6 +43,7 @@ async function checkAuth() {
     const res = await fetch("/api/me");
     const data = await res.json();
     currentUser = data.user;
+    if (data.low_credit_threshold !== undefined) lowCreditThreshold = data.low_credit_threshold;
   } catch {
     currentUser = null;
   }
@@ -62,7 +64,7 @@ function renderAuthUI() {
     const img = currentUser.is_admin
       ? `<a href="/admin" class="profile-admin-link" title="관리자 페이지">${imgTag}</a>`
       : imgTag;
-    const lowClass = currentUser.credits <= 2 ? " low" : "";
+    const lowClass = currentUser.credits <= lowCreditThreshold ? " low" : "";
 
     authArea.innerHTML = `
       <div class="profile-info">
@@ -70,7 +72,7 @@ function renderAuthUI() {
         <span class="profile-name">${escapeHtml(currentUser.name)}</span>
       </div>
       <div class="token-wrapper">
-        <span class="credit-badge${lowClass}" id="credit-badge">${currentUser.credits} 토큰</span>
+        <span class="credit-badge${lowClass}" id="credit-badge">${currentUser.credits} 크레딧</span>
       </div>
       <button class="logout-btn" id="logout-btn" title="로그아웃">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -95,8 +97,8 @@ function updateCreditDisplay(credits) {
   if (currentUser) currentUser.credits = credits;
   const badge = document.getElementById("credit-badge");
   if (!badge) return;
-  badge.textContent = `${credits} 토큰`;
-  badge.classList.toggle("low", credits <= 2);
+  badge.textContent = `${credits} 크레딧`;
+  badge.classList.toggle("low", credits <= lowCreditThreshold);
 }
 
 async function handleLogout() {
@@ -125,7 +127,7 @@ function toggleTokenPopover() {
   tokenPopover.className = "token-popover";
   tokenPopover.innerHTML = `
     <div class="token-popover-header">
-      <span>토큰 내역</span>
+      <span>크레딧 사용 내역</span>
     </div>
     <div class="token-history"><div class="token-history-loading">불러오는 중...</div></div>
     <div class="token-popover-footer">
@@ -194,7 +196,7 @@ async function loadTransactions() {
 }
 
 async function handleTokenPurchase() {
-  alert("토큰 구매 기능은 준비 중입니다.");
+  alert("크레딧 구매 기능은 준비 중입니다.");
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +355,7 @@ form.addEventListener("submit", async (e) => {
     }
 
     if (res.status === 402) {
-      answerEl.textContent = "토큰이 부족합니다. 구매 후 다시 시도해주세요.";
+      answerEl.textContent = "크레딧이 부족합니다. 구매 후 다시 시도해주세요.";
       updateCreditDisplay(0);
       setLoading(false);
       return;
@@ -584,7 +586,7 @@ function showWelcome() {
         <p class="welcome-subtitle">자작자동차 규정 및 Q&A 챗봇</p>
       </div>
       <div class="welcome-models">
-        <div class="welcome-models-title">모델 선택 (소모 토큰)</div>
+        <div class="welcome-models-title">모델 선택 (소모 크레딧)</div>
         <div class="welcome-models-grid">
           ${buildWelcomeModelRows()}
         </div>
@@ -592,7 +594,7 @@ function showWelcome() {
       <div class="welcome-items">
         <div class="welcome-item">
           <span class="welcome-icon">&#9889;</span>
-          <span>질문 1회당 선택한 모델에 따라 토큰이 차감됩니다</span>
+          <span>질문 1회당 선택한 모델에 따라 크레딧이 차감됩니다</span>
         </div>
         <div class="welcome-item">
           <span class="welcome-icon">&#128218;</span>

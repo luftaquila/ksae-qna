@@ -182,6 +182,7 @@ _site_settings: dict[str, str] = {}
 
 _SITE_DEFAULTS: dict[str, str] = {
     "default_credits": "1",
+    "low_credit_threshold": "2",
 }
 
 
@@ -337,7 +338,7 @@ def add_credits(user_id: int, amount: int) -> int | None:
     )
     conn.execute(
         "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
-        (user_id, amount, "purchase", "토큰 구매"),
+        (user_id, amount, "purchase", "크레딧 구매"),
     )
     conn.commit()
     row = conn.execute("SELECT credits FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -519,6 +520,28 @@ def list_all_users() -> list[dict]:
         GROUP BY u.id
         ORDER BY u.created_at DESC
         """
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_user_token_usage_by_model(user_id: int) -> list[dict]:
+    """Return per-model token usage breakdown for a user."""
+    conn = _get_conn()
+    rows = conn.execute(
+        """
+        SELECT m.model,
+               COALESCE(SUM(m.input_tokens), 0) AS input_tokens,
+               COALESCE(SUM(m.output_tokens), 0) AS output_tokens,
+               COALESCE(SUM(m.thinking_tokens), 0) AS thinking_tokens,
+               COUNT(*) AS message_count
+        FROM sessions s
+        JOIN messages m ON m.session_id = s.id AND m.role = 'assistant'
+        WHERE s.user_id = ? AND m.input_tokens IS NOT NULL
+        GROUP BY m.model
+        ORDER BY m.model
+        """,
+        (user_id,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]

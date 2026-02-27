@@ -257,6 +257,83 @@
 }
 
 /* ==========================================================================
+   API Token Popover (per-model breakdown)
+   ========================================================================== */
+.api-token-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.api-usage-chip.clickable {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.api-usage-chip.clickable:hover {
+  opacity: 0.7;
+}
+
+.api-token-popover {
+  left: 0;
+  right: auto;
+  width: 320px;
+}
+
+.api-model-row {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.api-model-row:last-child {
+  border-bottom: none;
+}
+
+.api-model-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.api-model-name {
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+.api-model-cost {
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: var(--color-primary);
+}
+
+.api-model-details {
+  display: flex;
+  gap: 10px;
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+}
+
+.api-model-count {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.api-model-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ==========================================================================
    Conversations Tab — 2-column layout
    ========================================================================== */
 .conversations-layout {
@@ -423,9 +500,10 @@
 
 .api-token-cell {
   white-space: nowrap;
-  display: flex;
-  gap: 6px;
-  align-items: center;
+}
+
+.api-token-cell .api-usage-chip {
+  margin-right: 6px;
 }
 
 .api-usage-chip {

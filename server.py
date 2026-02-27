@@ -28,6 +28,8 @@ from src.auth import (
     get_all_site_settings,
     get_current_user,
     get_messages,
+    get_site_setting,
+    get_user_token_usage_by_model,
     get_or_create_user,
     get_session,
     get_transactions,
@@ -127,6 +129,7 @@ class ModelToggleRequest(BaseModel):
 
 class SiteSettingsRequest(BaseModel):
     default_credits: int = Field(..., ge=0, le=10000)
+    low_credit_threshold: int = Field(..., ge=0, le=10000)
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +184,11 @@ async def me(request: Request):
     user = get_current_user(request)
     if not user:
         return JSONResponse({"user": None}, status_code=200)
+    low_threshold = 2
+    try:
+        low_threshold = max(0, int(get_site_setting("low_credit_threshold")))
+    except (ValueError, TypeError):
+        pass
     return {
         "user": {
             "id": user["id"],
@@ -189,7 +197,8 @@ async def me(request: Request):
             "picture": user["picture"],
             "credits": user["credits"],
             "is_admin": is_admin(request) is not None,
-        }
+        },
+        "low_credit_threshold": low_threshold,
     }
 
 
@@ -422,6 +431,13 @@ async def admin_update_credits(user_id: int, body: AdminCreditRequest, request: 
     return {"credits": result}
 
 
+@app.get("/api/admin/users/{user_id}/token-usage")
+async def admin_user_token_usage(user_id: int, request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    return {"usage": get_user_token_usage_by_model(user_id)}
+
+
 @app.get("/api/admin/users/{user_id}/transactions")
 async def admin_user_transactions(user_id: int, request: Request):
     if not is_admin(request):
@@ -472,6 +488,7 @@ async def admin_update_settings(body: SiteSettingsRequest, request: Request):
     if not is_admin(request):
         return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
     set_site_setting("default_credits", str(body.default_credits))
+    set_site_setting("low_credit_threshold", str(body.low_credit_threshold))
     return {"ok": True, "settings": get_all_site_settings()}
 
 

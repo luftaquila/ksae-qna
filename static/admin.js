@@ -8,6 +8,7 @@ const convMessages = document.getElementById("conv-messages");
 let allUsers = [];
 let allModels = [];
 let currentConvSessionId = null;
+let lowCreditThreshold = 2;
 
 // ---------------------------------------------------------------------------
 // Theme (reused from script.js)
@@ -86,7 +87,7 @@ function renderUsers(filter = "") {
         ? `<img src="${escapeAttr(u.picture)}" class="user-picture" referrerpolicy="no-referrer">`
         : "";
       const date = u.created_at ? formatLocal(u.created_at) : "";
-      const lowClass = u.credits <= 2 ? " low" : "";
+      const lowClass = u.credits <= lowCreditThreshold ? " low" : "";
       const totalIn = u.total_input_tokens || 0;
       const totalOut = u.total_output_tokens || 0;
       const totalThink = u.total_thinking_tokens || 0;
@@ -97,14 +98,16 @@ function renderUsers(filter = "") {
         <td>
           <div class="credit-cell" id="credit-cell-${u.id}">
             <div class="token-wrapper">
-              <span class="credit-badge${lowClass}" onclick="toggleAdminPopover(${u.id})">${u.credits} 토큰</span>
+              <span class="credit-badge${lowClass}" onclick="toggleAdminPopover(${u.id})">${u.credits} 크레딧</span>
             </div>
             <button class="credit-adjust-btn" onclick="showCreditEditor(${u.id}, ${u.credits})">조정</button>
           </div>
         </td>
         <td class="api-token-cell">
-          <span class="api-usage-chip">IN ${totalIn.toLocaleString()} / OUT ${totalOut.toLocaleString()} / THK ${totalThink.toLocaleString()}</span>
-          <span class="api-cost-chip">${cost}</span>
+          <div class="api-token-wrapper" id="api-token-wrapper-${u.id}">
+            <span class="api-usage-chip clickable" onclick="toggleApiTokenPopover(${u.id})">IN ${totalIn.toLocaleString()} / OUT ${totalOut.toLocaleString()} / THK ${totalThink.toLocaleString()}</span>
+            <span class="api-cost-chip">${cost}</span>
+          </div>
         </td>
         <td>${date}</td>
       </tr>`;
@@ -187,7 +190,7 @@ window.toggleAdminPopover = function (userId) {
   adminPopover = document.createElement("div");
   adminPopover.className = "token-popover";
   adminPopover.innerHTML = `
-    <div class="token-popover-header">토큰 내역</div>
+    <div class="token-popover-header">크레딧 사용 내역</div>
     <div class="token-history"><div class="token-history-loading">불러오는 중...</div></div>
   `;
   wrapper.appendChild(adminPopover);
@@ -238,6 +241,95 @@ async function loadAdminTransactions(userId) {
         <span class="token-tx-amount">${sign}${t.amount}</span>
       </div>`;
     }).join("");
+  } catch {
+    historyEl.innerHTML = `<div class="token-history-empty">불러오기 실패</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// API token usage popover (per-model breakdown)
+// ---------------------------------------------------------------------------
+let apiTokenPopover = null;
+let apiTokenPopoverUserId = null;
+
+window.toggleApiTokenPopover = function (userId) {
+  if (apiTokenPopover && apiTokenPopoverUserId === userId) {
+    closeApiTokenPopover();
+    return;
+  }
+  closeApiTokenPopover();
+
+  apiTokenPopoverUserId = userId;
+  const wrapper = document.getElementById(`api-token-wrapper-${userId}`);
+  if (!wrapper) return;
+
+  apiTokenPopover = document.createElement("div");
+  apiTokenPopover.className = "token-popover api-token-popover";
+  apiTokenPopover.innerHTML = `
+    <div class="token-popover-header">모델별 API 사용량</div>
+    <div class="token-history"><div class="token-history-loading">불러오는 중...</div></div>
+  `;
+  wrapper.appendChild(apiTokenPopover);
+
+  loadApiTokenUsage(userId);
+  setTimeout(() => document.addEventListener("click", onApiTokenPopoverOutside), 0);
+};
+
+function closeApiTokenPopover() {
+  if (apiTokenPopover) {
+    apiTokenPopover.remove();
+    apiTokenPopover = null;
+    apiTokenPopoverUserId = null;
+  }
+  document.removeEventListener("click", onApiTokenPopoverOutside);
+}
+
+function onApiTokenPopoverOutside(e) {
+  if (apiTokenPopover && !apiTokenPopover.contains(e.target) && !e.target.classList.contains("api-usage-chip")) {
+    closeApiTokenPopover();
+  }
+}
+
+async function loadApiTokenUsage(userId) {
+  const historyEl = apiTokenPopover?.querySelector(".token-history");
+  if (!historyEl) return;
+
+  try {
+    const res = await fetch(`/api/admin/users/${userId}/token-usage`);
+    const data = await res.json();
+    const usage = data.usage || [];
+
+    if (!usage.length) {
+      historyEl.innerHTML = `<div class="token-history-empty">사용 내역이 없습니다</div>`;
+      return;
+    }
+
+    let totalCost = 0;
+    const rows = usage.map((u) => {
+      const model = u.model || "(미기록)";
+      const p = MODEL_PRICING[u.model] || DEFAULT_PRICING;
+      const cost = (u.input_tokens * p.input + u.output_tokens * p.output + u.thinking_tokens * p.thinking) / 1_000_000;
+      totalCost += cost;
+      const costStr = cost < 0.01 ? "$" + cost.toFixed(4) : "$" + cost.toFixed(2);
+      return `<div class="api-model-row">
+        <div class="api-model-header">
+          <span class="api-model-name">${escapeHtml(model)}</span>
+          <span class="api-model-cost">${costStr}</span>
+        </div>
+        <div class="api-model-details">
+          <span>IN ${u.input_tokens.toLocaleString()}</span>
+          <span>OUT ${u.output_tokens.toLocaleString()}</span>
+          <span>THK ${u.thinking_tokens.toLocaleString()}</span>
+          <span class="api-model-count">${u.message_count}회</span>
+        </div>
+      </div>`;
+    }).join("");
+
+    const totalCostStr = totalCost < 0.01 ? "$" + totalCost.toFixed(4) : "$" + totalCost.toFixed(2);
+    historyEl.innerHTML = rows + `<div class="api-model-total">
+      <span>합계</span>
+      <span class="api-model-cost">${totalCostStr}</span>
+    </div>`;
   } catch {
     historyEl.innerHTML = `<div class="token-history-empty">불러오기 실패</div>`;
   }
@@ -546,6 +638,11 @@ async function loadSettings() {
     if (input && settings.default_credits !== undefined) {
       input.value = settings.default_credits;
     }
+    const thresholdInput = document.getElementById("setting-low-credit-threshold");
+    if (thresholdInput && settings.low_credit_threshold !== undefined) {
+      thresholdInput.value = settings.low_credit_threshold;
+      lowCreditThreshold = parseInt(settings.low_credit_threshold, 10) || 2;
+    }
   } catch {
     // ignore
   }
@@ -553,10 +650,12 @@ async function loadSettings() {
 
 window.saveSettings = async function () {
   const input = document.getElementById("setting-default-credits");
-  if (!input) return;
+  const thresholdInput = document.getElementById("setting-low-credit-threshold");
+  if (!input || !thresholdInput) return;
 
   const defaultCredits = parseInt(input.value, 10);
-  if (isNaN(defaultCredits) || defaultCredits < 0) {
+  const threshold = parseInt(thresholdInput.value, 10);
+  if (isNaN(defaultCredits) || defaultCredits < 0 || isNaN(threshold) || threshold < 0) {
     alert("올바른 값을 입력하세요");
     return;
   }
@@ -568,11 +667,14 @@ window.saveSettings = async function () {
     const res = await fetch("/api/admin/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ default_credits: defaultCredits }),
+      body: JSON.stringify({ default_credits: defaultCredits, low_credit_threshold: threshold }),
     });
     if (res.ok) {
       const data = await res.json();
       input.value = data.settings.default_credits;
+      thresholdInput.value = data.settings.low_credit_threshold;
+      lowCreditThreshold = parseInt(data.settings.low_credit_threshold, 10) || 2;
+      renderUsers(userSearch.value);
       btn.textContent = "저장됨";
       setTimeout(() => { btn.textContent = "저장"; }, 1500);
     } else {
