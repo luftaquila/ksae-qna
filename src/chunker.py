@@ -12,31 +12,30 @@ import re
 from pathlib import Path
 from typing import Any
 
+from transformers import AutoTokenizer
+
 logger = logging.getLogger(__name__)
+
+_tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3")
 
 MAX_TOKENS = 512
 OVERLAP_TOKENS = 50
 
 
-def _tokenize(text: str) -> list[str]:
-    """Simple whitespace tokenizer for rough token counting."""
-    return text.split()
-
-
 def _token_count(text: str) -> int:
-    """Count tokens using whitespace splitting."""
-    return len(_tokenize(text))
+    """Count tokens using the BGE-M3 (XLM-RoBERTa) tokenizer."""
+    return len(_tokenizer.encode(text, add_special_tokens=False))
 
 
 def _force_split_by_tokens(text: str) -> list[str]:
     """Force-split text exceeding MAX_TOKENS into overlapping token windows."""
-    tokens = _tokenize(text)
+    token_ids = _tokenizer.encode(text, add_special_tokens=False)
     step = MAX_TOKENS - OVERLAP_TOKENS
     segments: list[str] = []
-    for i in range(0, len(tokens), step):
-        window = tokens[i : i + MAX_TOKENS]
-        segments.append(" ".join(window))
-        if i + MAX_TOKENS >= len(tokens):
+    for i in range(0, len(token_ids), step):
+        window = token_ids[i : i + MAX_TOKENS]
+        segments.append(_tokenizer.decode(window, skip_special_tokens=True))
+        if i + MAX_TOKENS >= len(token_ids):
             break
     return segments
 
@@ -59,7 +58,7 @@ def _split_into_segments(text: str) -> list[str]:
             segments.append(para)
         else:
             # Split long paragraphs by sentence boundaries
-            sentences = re.split(r"(?<=[.!?。])\s+", para)
+            sentences = re.split(r"(?<=[.!?。])\s+|\n", para)
             for sent in sentences:
                 sent = sent.strip()
                 if not sent:
@@ -83,13 +82,13 @@ def _build_chunks_from_segments(
     """
     chunks: list[dict[str, Any]] = []
     chunk_index = 0
-    current_tokens: list[str] = []
+    current_text = ""
+    current_count = 0
 
     for segment in segments:
-        seg_tokens = _tokenize(segment)
-        if current_tokens and len(current_tokens) + len(seg_tokens) > MAX_TOKENS:
+        seg_count = _token_count(segment)
+        if current_text and current_count + seg_count > MAX_TOKENS:
             # Emit current chunk
-            chunk_text = " ".join(current_tokens)
             chunks.append({
                 "post_id": post_meta["id"],
                 "category": post_meta["category"],
@@ -97,18 +96,23 @@ def _build_chunks_from_segments(
                 "date": post_meta["date"],
                 "url": post_meta["url"],
                 "chunk_index": chunk_index,
-                "text": chunk_text,
+                "text": current_text,
             })
             chunk_index += 1
-            # Start next chunk with overlap from the tail of current tokens
-            overlap = current_tokens[-OVERLAP_TOKENS:] if len(current_tokens) >= OVERLAP_TOKENS else current_tokens[:]
-            current_tokens = overlap + seg_tokens
+            # Start next chunk with overlap from the tail of current text
+            token_ids = _tokenizer.encode(current_text, add_special_tokens=False)
+            if len(token_ids) >= OVERLAP_TOKENS:
+                overlap_text = _tokenizer.decode(token_ids[-OVERLAP_TOKENS:], skip_special_tokens=True)
+            else:
+                overlap_text = current_text
+            current_text = overlap_text + "\n" + segment
+            current_count = _token_count(current_text)
         else:
-            current_tokens.extend(seg_tokens)
+            current_text = (current_text + "\n" + segment).strip() if current_text else segment
+            current_count = _token_count(current_text)
 
-    # Emit remaining tokens as the last chunk
-    if current_tokens:
-        chunk_text = " ".join(current_tokens)
+    # Emit remaining text as the last chunk
+    if current_text:
         chunks.append({
             "post_id": post_meta["id"],
             "category": post_meta["category"],
@@ -116,7 +120,7 @@ def _build_chunks_from_segments(
             "date": post_meta["date"],
             "url": post_meta["url"],
             "chunk_index": chunk_index,
-            "text": chunk_text,
+            "text": current_text,
         })
 
     return chunks
@@ -192,9 +196,10 @@ def chunk_posts(
             continue
 
         # Truncate question body for context prefix in answer chunks
-        q_tokens = _tokenize(question_body)
-        if len(q_tokens) > QUESTION_CONTEXT_MAX_TOKENS:
-            question_context = " ".join(q_tokens[:QUESTION_CONTEXT_MAX_TOKENS]) + " ..."
+        q_count = _token_count(question_body)
+        if q_count > QUESTION_CONTEXT_MAX_TOKENS:
+            q_ids = _tokenizer.encode(question_body, add_special_tokens=False)
+            question_context = _tokenizer.decode(q_ids[:QUESTION_CONTEXT_MAX_TOKENS], skip_special_tokens=True) + " ..."
         else:
             question_context = question_body
 
