@@ -793,6 +793,13 @@ async function loadSettings() {
       thresholdInput.value = settings.low_credit_threshold;
       lowCreditThreshold = parseInt(settings.low_credit_threshold, 10) || 5;
     }
+    const unlimitedCheckbox = document.getElementById("setting-unlimited-credits");
+    const unlimitedLabel = document.getElementById("unlimited-label");
+    if (unlimitedCheckbox) {
+      const on = settings.unlimited_credits === "true" || settings.unlimited_credits === "1";
+      unlimitedCheckbox.checked = on;
+      if (unlimitedLabel) unlimitedLabel.textContent = on ? "활성" : "비활성";
+    }
   } catch {
     // ignore
   }
@@ -808,6 +815,7 @@ function autoSaveSettings() {
 async function doSaveSettings() {
   const input = document.getElementById("setting-default-credits");
   const thresholdInput = document.getElementById("setting-low-credit-threshold");
+  const unlimitedCheckbox = document.getElementById("setting-unlimited-credits");
   if (!input || !thresholdInput) return;
 
   const defaultCredits = parseInt(input.value, 10);
@@ -818,7 +826,11 @@ async function doSaveSettings() {
     const res = await fetch("/api/admin/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ default_credits: defaultCredits, low_credit_threshold: threshold }),
+      body: JSON.stringify({
+        default_credits: defaultCredits,
+        low_credit_threshold: threshold,
+        unlimited_credits: unlimitedCheckbox ? unlimitedCheckbox.checked : false,
+      }),
     });
     if (res.ok) {
       const data = await res.json();
@@ -832,6 +844,36 @@ async function doSaveSettings() {
 
 document.getElementById("setting-default-credits").addEventListener("change", autoSaveSettings);
 document.getElementById("setting-low-credit-threshold").addEventListener("change", autoSaveSettings);
+
+document.getElementById("setting-unlimited-credits").addEventListener("change", () => {
+  const label = document.getElementById("unlimited-label");
+  if (label) label.textContent = document.getElementById("setting-unlimited-credits").checked ? "활성" : "비활성";
+  autoSaveSettings();
+});
+
+document.getElementById("bulk-credit-btn").addEventListener("click", async () => {
+  const input = document.getElementById("bulk-credit-value");
+  const credits = parseInt(input.value, 10);
+  if (isNaN(credits) || credits < 0) return;
+  if (!confirm(`모든 사용자의 크레딧을 ${credits}(으)로 일괄 변경합니다. 계속하시겠습니까?`)) return;
+  try {
+    const res = await fetch("/api/admin/credits/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credits }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      alert(`${data.affected}명의 크레딧이 변경되었습니다.`);
+      loadUsers();
+    } else {
+      const err = await res.json();
+      alert(err.error || "일괄 변경에 실패했습니다");
+    }
+  } catch {
+    alert("일괄 변경에 실패했습니다");
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

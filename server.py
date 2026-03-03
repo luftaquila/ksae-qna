@@ -21,6 +21,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from src.auth import (
     add_credits,
     add_message,
+    admin_bulk_set_credits,
     get_user_by_id,
     refund_credit,
     admin_get_messages,
@@ -44,6 +45,7 @@ from src.auth import (
     init_oauth,
     init_site_settings,
     is_admin,
+    is_unlimited_credits,
     list_all_sessions,
     list_all_users,
     list_sessions,
@@ -140,6 +142,12 @@ class ModelToggleRequest(BaseModel):
 class SiteSettingsRequest(BaseModel):
     default_credits: int = Field(..., ge=0, le=10000)
     low_credit_threshold: int = Field(..., ge=0, le=10000)
+    unlimited_credits: bool = Field(default=False)
+
+
+class BulkCreditRequest(BaseModel):
+    credits: int = Field(..., ge=0)
+    memo: str = Field(default="관리자 일괄 조정", max_length=200)
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +217,7 @@ async def me(request: Request):
             "is_admin": is_admin(request) is not None,
         },
         "low_credit_threshold": low_threshold,
+        "unlimited_credits": is_unlimited_credits(),
     }
 
 
@@ -467,6 +476,14 @@ async def admin_update_credits(user_id: int, body: AdminCreditRequest, request: 
     return {"credits": result}
 
 
+@app.post("/api/admin/credits/bulk")
+async def admin_bulk_credits(body: BulkCreditRequest, request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    affected = admin_bulk_set_credits(body.credits, body.memo)
+    return {"ok": True, "affected": affected}
+
+
 @app.get("/api/admin/users/{user_id}/token-usage")
 async def admin_user_token_usage(user_id: int, request: Request):
     if not is_admin(request):
@@ -541,6 +558,7 @@ async def admin_update_settings(body: SiteSettingsRequest, request: Request):
         return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
     set_site_setting("default_credits", str(body.default_credits))
     set_site_setting("low_credit_threshold", str(body.low_credit_threshold))
+    set_site_setting("unlimited_credits", str(body.unlimited_credits).lower())
     return {"ok": True, "settings": get_all_site_settings()}
 
 

@@ -189,6 +189,7 @@ _site_settings: dict[str, str] = {}
 _SITE_DEFAULTS: dict[str, str] = {
     "default_credits": "15",
     "low_credit_threshold": "5",
+    "unlimited_credits": "false",
 }
 
 
@@ -224,6 +225,11 @@ def get_default_credits() -> int:
         return max(0, int(get_site_setting("default_credits")))
     except (ValueError, TypeError):
         return 1
+
+
+def is_unlimited_credits() -> bool:
+    """Return True if the site-wide unlimited credits mode is enabled."""
+    return get_site_setting("unlimited_credits").lower() in ("1", "true")
 
 
 def get_all_site_settings() -> dict[str, str]:
@@ -320,6 +326,8 @@ def get_user_by_id(user_id: int) -> dict | None:
 
 def deduct_credit(user_id: int, amount: int = 1, memo: str = "질문") -> bool:
     """Atomically deduct *amount* credits. Returns True if successful."""
+    if is_unlimited_credits():
+        return True
     conn = _get_conn()
     cur = conn.execute(
         "UPDATE users SET credits = credits - ?, updated_at = datetime('now') WHERE id = ? AND credits >= ?",
@@ -338,6 +346,8 @@ def deduct_credit(user_id: int, amount: int = 1, memo: str = "질문") -> bool:
 
 def refund_credit(user_id: int, amount: int = 1, memo: str = "환불") -> None:
     """Refund credits back to a user (e.g. on LLM error)."""
+    if is_unlimited_credits():
+        return
     conn = _get_conn()
     conn.execute(
         "UPDATE users SET credits = credits + ?, updated_at = datetime('now') WHERE id = ?",
@@ -631,6 +641,29 @@ def admin_set_credits(user_id: int, credits: int, memo: str = "관리자 조정"
     conn.commit()
     conn.close()
     return credits
+
+
+def admin_bulk_set_credits(credits: int, memo: str = "관리자 일괄 조정") -> int:
+    """Set all users' credits to an absolute value and record the delta for each. Returns affected count."""
+    conn = _get_conn()
+    rows = conn.execute("SELECT id, credits FROM users").fetchall()
+    affected = 0
+    for r in rows:
+        delta = credits - r["credits"]
+        if delta == 0:
+            continue
+        conn.execute(
+            "UPDATE users SET credits = ?, updated_at = datetime('now') WHERE id = ?",
+            (credits, r["id"]),
+        )
+        conn.execute(
+            "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
+            (r["id"], delta, "admin", memo),
+        )
+        affected += 1
+    conn.commit()
+    conn.close()
+    return affected
 
 
 def list_all_sessions(user_id: int | None = None) -> list[dict]:

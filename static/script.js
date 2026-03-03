@@ -14,6 +14,7 @@ let currentUser = null;
 let currentSessionId = null;
 let availableModels = [];
 let lowCreditThreshold = 5;
+let unlimitedCredits = false;
 
 // ---------------------------------------------------------------------------
 // Mobile sidebar
@@ -44,6 +45,7 @@ async function checkAuth() {
     const data = await res.json();
     currentUser = data.user;
     if (data.low_credit_threshold !== undefined) lowCreditThreshold = data.low_credit_threshold;
+    unlimitedCredits = !!data.unlimited_credits;
   } catch {
     currentUser = null;
   }
@@ -64,7 +66,8 @@ function renderAuthUI() {
     const img = currentUser.is_admin
       ? `<a href="/admin" class="profile-admin-link" title="관리자 페이지">${imgTag}</a>`
       : imgTag;
-    const lowClass = currentUser.credits <= lowCreditThreshold ? " low" : "";
+    const creditText = unlimitedCredits ? "∞ 크레딧" : `${currentUser.credits} 크레딧`;
+    const lowClass = !unlimitedCredits && currentUser.credits <= lowCreditThreshold ? " low" : "";
 
     authArea.innerHTML = `
       <div class="profile-info">
@@ -72,7 +75,7 @@ function renderAuthUI() {
         <span class="profile-name">${escapeHtml(currentUser.name)}</span>
       </div>
       <div class="token-wrapper">
-        <span class="credit-badge${lowClass}" id="credit-badge">${currentUser.credits} 크레딧</span>
+        <span class="credit-badge${lowClass}" id="credit-badge">${creditText}</span>
       </div>
       <button class="logout-btn" id="logout-btn" title="로그아웃">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -97,8 +100,13 @@ function updateCreditDisplay(credits) {
   if (currentUser) currentUser.credits = credits;
   const badge = document.getElementById("credit-badge");
   if (!badge) return;
-  badge.textContent = `${credits} 크레딧`;
-  badge.classList.toggle("low", credits <= lowCreditThreshold);
+  if (unlimitedCredits) {
+    badge.textContent = "∞ 크레딧";
+    badge.classList.remove("low");
+  } else {
+    badge.textContent = `${credits} 크레딧`;
+    badge.classList.toggle("low", credits <= lowCreditThreshold);
+  }
 }
 
 async function handleLogout() {
