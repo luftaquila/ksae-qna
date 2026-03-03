@@ -56,9 +56,10 @@ def _run_stage(name: str, func: object, **kwargs: object) -> None:
 @click.option("--batch-size", default=32, type=int, help="Embedding batch size.")
 @click.option("--embed-url", default=None, help="BGE-M3 embedding API URL. If not set, uses local model.")
 @click.option("--delay", default=1.5, type=float, help="Delay between requests (seconds).")
+@click.option("--workers", default=5, type=int, help="Max concurrent requests for detail crawling.")
 @click.option("--mode", default="incremental", type=click.Choice(["full", "incremental"]), help="Crawl mode: full or incremental (default: incremental).")
 @click.pass_context
-def cli(ctx: click.Context, qdrant_url: str, qdrant_api_key: str | None, collection: str, batch_size: int, embed_url: str, delay: float, mode: str) -> None:
+def cli(ctx: click.Context, qdrant_url: str, qdrant_api_key: str | None, collection: str, batch_size: int, embed_url: str, delay: float, workers: int, mode: str) -> None:
     """KSAE Q&A VectorDB Pipeline.
 
     Run the full pipeline (crawl -> chunk -> embed -> upload) or individual stages.
@@ -70,14 +71,15 @@ def cli(ctx: click.Context, qdrant_url: str, qdrant_api_key: str | None, collect
     ctx.obj["batch_size"] = batch_size
     ctx.obj["embed_url"] = embed_url
     ctx.obj["delay"] = delay
+    ctx.obj["workers"] = workers
     ctx.obj["mode"] = mode
 
     if ctx.invoked_subcommand is None:
         # Run full pipeline
-        _run_full_pipeline(qdrant_url, qdrant_api_key, collection, batch_size, embed_url, delay, mode)
+        _run_full_pipeline(qdrant_url, qdrant_api_key, collection, batch_size, embed_url, delay, workers, mode)
 
 
-def _run_full_pipeline(qdrant_url: str, qdrant_api_key: str | None, collection: str, batch_size: int, embed_url: str, delay: float, mode: str = "incremental") -> None:
+def _run_full_pipeline(qdrant_url: str, qdrant_api_key: str | None, collection: str, batch_size: int, embed_url: str, delay: float, workers: int = 5, mode: str = "incremental") -> None:
     """Execute the full pipeline: crawl -> chunk -> embed -> upload."""
     import json
 
@@ -101,10 +103,10 @@ def _run_full_pipeline(qdrant_url: str, qdrant_api_key: str | None, collection: 
             click.echo("No new posts found.")
             return
         click.echo(f"Found {len(new_post_list)} new posts to process")
-        _run_stage("crawl-detail", crawl_all_details, post_list=new_post_list, delay=delay)
+        _run_stage("crawl-detail", crawl_all_details, post_list=new_post_list, delay=delay, max_workers=workers)
         _run_stage("merge", merge_posts)
     else:
-        _run_stage("crawl-detail", crawl_all_details, post_list=post_list, delay=delay)
+        _run_stage("crawl-detail", crawl_all_details, post_list=post_list, delay=delay, max_workers=workers)
 
     _run_stage("chunk", chunk_posts)
     _run_stage("embed", embed_chunks, batch_size=batch_size, embed_url=embed_url)
@@ -124,6 +126,7 @@ def crawl(ctx: click.Context) -> None:
     from src.crawler import crawl_all_details, crawl_list_pages, filter_new_posts, merge_posts
 
     delay: float = ctx.obj["delay"]
+    workers: int = ctx.obj["workers"]
     mode: str = ctx.obj["mode"]
     is_incremental = mode == "incremental"
 
@@ -138,10 +141,10 @@ def crawl(ctx: click.Context) -> None:
             click.echo("No new posts found.")
             return
         click.echo(f"Found {len(new_post_list)} new posts to process")
-        _run_stage("crawl-detail", crawl_all_details, post_list=new_post_list, delay=delay)
+        _run_stage("crawl-detail", crawl_all_details, post_list=new_post_list, delay=delay, max_workers=workers)
         _run_stage("merge", merge_posts)
     else:
-        _run_stage("crawl-detail", crawl_all_details, post_list=post_list, delay=delay)
+        _run_stage("crawl-detail", crawl_all_details, post_list=post_list, delay=delay, max_workers=workers)
 
 
 @cli.command()

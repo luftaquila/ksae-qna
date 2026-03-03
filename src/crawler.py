@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://www.ksae.org"
 LIST_URL = f"{BASE_URL}/jajak/bbs/"
 DEFAULT_DELAY = 1.5
+DEFAULT_WORKERS = 5
 MAX_RETRIES = 3
 
 
@@ -45,16 +48,15 @@ def _make_session() -> requests.Session:
     return session
 
 
-# Module-level session for reuse across calls
-_session: requests.Session | None = None
+# Thread-local session storage (requests.Session is not thread-safe)
+_thread_local = threading.local()
 
 
 def _get_session() -> requests.Session:
-    """Get or create the module-level requests session."""
-    global _session
-    if _session is None:
-        _session = _make_session()
-    return _session
+    """Get or create a thread-local requests session."""
+    if not hasattr(_thread_local, "session"):
+        _thread_local.session = _make_session()
+    return _thread_local.session
 
 
 def _get_soup(url: str, params: dict[str, Any] | None = None) -> BeautifulSoup:
@@ -433,9 +435,40 @@ def crawl_detail_page(post_number: int) -> dict[str, Any]:
     }
 
 
+def _crawl_detail_with_retry(
+    number: int,
+    delay: float = DEFAULT_DELAY,
+) -> tuple[int, dict[str, Any] | None]:
+    """Crawl a single detail page with retry logic (thread-safe).
+
+    Args:
+        number: The post number to crawl.
+        delay: Base delay for exponential backoff on retries.
+
+    Returns:
+        Tuple of (post number, detail dict or None on failure).
+    """
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            detail = crawl_detail_page(number)
+            return number, detail
+        except Exception:
+            if attempt < MAX_RETRIES:
+                wait = delay * (2 ** (attempt - 1))
+                logger.warning(
+                    "Attempt %d failed for number=%d, retrying in %.1fs...",
+                    attempt, number, wait,
+                )
+                time.sleep(wait)
+            else:
+                logger.error("All %d attempts failed for number=%d", MAX_RETRIES, number)
+    return number, None
+
+
 def crawl_all_details(
     post_list: list[dict[str, Any]],
     delay: float = DEFAULT_DELAY,
+    max_workers: int = DEFAULT_WORKERS,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Crawl detail pages for all posts and build structured output.
 
@@ -443,47 +476,39 @@ def crawl_all_details(
     the ``answers`` list of the preceding question post.  Reply-only posts
     (those with ``is_reply=True``) are not emitted as separate entries.
 
+    Uses a thread pool for concurrent requests to speed up crawling.
+
     Args:
         post_list: List of post metadata dicts from ``crawl_list_pages()``.
-        delay: Seconds to wait between requests.
+        delay: Seconds to wait between requests (used for retry backoff).
+        max_workers: Maximum number of concurrent requests.
 
     Returns:
         Tuple of (posts list, crawl metadata dict).
     """
     failed_ids: list[int] = []
-
-    # Crawl all detail pages with retry logic
     detail_map: dict[int, dict[str, Any]] = {}
-    for idx, meta in enumerate(post_list):
-        number = meta["number"]
-        logger.info(
-            "Crawling detail %d/%d (number=%d)...", idx + 1, len(post_list), number
-        )
+    total = len(post_list)
 
-        detail: dict[str, Any] | None = None
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                detail = crawl_detail_page(number)
-                break
-            except Exception:
-                if attempt < MAX_RETRIES:
-                    wait = delay * (2 ** (attempt - 1))
-                    logger.warning(
-                        "Attempt %d failed for number=%d, retrying in %.1fs...",
-                        attempt,
-                        number,
-                        wait,
-                    )
-                    time.sleep(wait)
-                else:
-                    logger.error("All %d attempts failed for number=%d", MAX_RETRIES, number)
-                    failed_ids.append(number)
+    logger.info("Crawling %d detail pages with %d workers...", total, max_workers)
 
-        if detail is not None:
-            detail_map[number] = detail
+    completed = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_crawl_detail_with_retry, meta["number"], delay): meta
+            for meta in post_list
+        }
 
-        if idx < len(post_list) - 1:
-            time.sleep(delay)
+        for future in as_completed(futures):
+            number, detail = future.result()
+            completed += 1
+
+            if detail is not None:
+                detail_map[number] = detail
+                logger.info("Crawled detail %d/%d (number=%d)", completed, total, number)
+            else:
+                failed_ids.append(number)
+                logger.warning("Failed detail %d/%d (number=%d)", completed, total, number)
 
     # Build structured posts by matching questions with reply posts.
     # In the list, reply posts (is_reply=True) appear right after the question

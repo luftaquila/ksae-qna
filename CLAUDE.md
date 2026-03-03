@@ -16,7 +16,7 @@ ksae-qna/
 ├── .env.example           # 환경 변수 템플릿
 ├── src/
 │   ├── auth.py            # Google OAuth, JWT, 사용자 DB, 토큰 시스템 + 거래 내역 + 관리자
-│   ├── crawler.py         # KSAE Q&A 게시판 크롤링 (목록 + 상세)
+│   ├── crawler.py         # KSAE Q&A 게시판 크롤링 (목록 + 상세, ThreadPoolExecutor 병렬)
 │   ├── chunker.py         # 텍스트 청킹 (512 토큰, 50 오버랩)
 │   ├── embedder.py        # BGE-M3 임베딩 (1024차원, 로컬/원격)
 │   ├── uploader.py        # Qdrant 벡터 DB 업로드
@@ -49,6 +49,8 @@ ksae-qna/
 ```bash
 # 데이터 파이프라인 (크롤링 → 벡터 DB 업로드)
 python main.py                        # 전체 파이프라인 (incremental)
+python main.py --mode full            # 전체 파이프라인 (full, 처음부터 재크롤링)
+python main.py --workers 10           # 상세 페이지 병렬 크롤링 동시 요청 수 (기본: 5)
 python main.py crawl                  # 크롤링만
 python main.py chunk                  # 청킹만
 python main.py embed                  # 임베딩만
@@ -111,3 +113,4 @@ python mcp_server.py                  # stdin/stdout JSON-RPC
 - `.env` 파일은 .gitignore에 포함 (API 키 보안)
 - BGE-M3 모델 첫 로딩 시 다운로드 필요 (~2GB)
 - 크롤러는 KSAE 서버의 약한 DH 키 대응을 위해 커스텀 SSL 설정 사용
+- 크롤러 상세 페이지는 `ThreadPoolExecutor`로 병렬 처리 (`--workers`, 기본 5). thread-local 세션 사용
