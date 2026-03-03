@@ -264,12 +264,17 @@ def search(
     for col_name in collection_names:
         # Only apply category filter to qna collection
         qf = category_filter if (category and col_name == COLLECTIONS.get("qna")) else None
-        results = _qdrant.query_points(
-            collection_name=col_name,
-            query=vector,
-            limit=limit,
-            query_filter=qf,
-        )
+        try:
+            results = _qdrant.query_points(
+                collection_name=col_name,
+                query=vector,
+                limit=limit,
+                query_filter=qf,
+            )
+        except Exception as e:
+            logger.error("Qdrant query failed for collection '%s': %s", col_name, e)
+            per_collection[col_name] = []
+            continue
 
         hits = []
         for hit in results.points:
@@ -289,12 +294,16 @@ def search(
                 source = ""
                 url = ""
 
-            hits.append({
+            hit_item = {
                 "score": hit.score,
                 "source": source,
                 "url": url,
                 "content": content,
-            })
+            }
+            # Track post_id for qna deduplication
+            if "id" in payload:
+                hit_item["post_id"] = payload["id"]
+            hits.append(hit_item)
 
         hits.sort(key=lambda x: x["score"], reverse=True)
         per_collection[col_name] = hits
@@ -307,9 +316,21 @@ def search(
         remainder.extend(hits[min_per_collection:])
 
     remainder.sort(key=lambda x: x["score"], reverse=True)
-    output = guaranteed + remainder
+    remaining_slots = max(0, limit - len(guaranteed))
+    output = guaranteed + remainder[:remaining_slots]
     output.sort(key=lambda x: x["score"], reverse=True)
-    return output[:limit]
+
+    # Deduplicate: keep only the highest-score chunk per post
+    seen_posts: set = set()
+    deduped: list[dict] = []
+    for item in output:
+        pid = item.get("post_id")
+        if pid is not None:
+            if pid in seen_posts:
+                continue
+            seen_posts.add(pid)
+        deduped.append(item)
+    return deduped
 
 
 def _build_prompt(query: str, sources: list[dict]) -> str:
