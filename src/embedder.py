@@ -33,7 +33,9 @@ def _embed_local(texts: list[str], batch_size: int) -> np.ndarray[Any, np.dtype[
     all_embeddings: list[np.ndarray[Any, np.dtype[np.float32]]] = []
     for i in tqdm(range(0, len(texts), batch_size), desc="Embedding"):
         batch_texts = texts[i : i + batch_size]
-        output = model.encode(batch_texts, batch_size=len(batch_texts))
+        # Encode one text at a time to avoid MPS memory overflow from
+        # padding all texts in the batch to the longest sequence length.
+        output = model.encode(batch_texts, batch_size=1)
         all_embeddings.append(output)
 
     return np.vstack(all_embeddings).astype(np.float32)

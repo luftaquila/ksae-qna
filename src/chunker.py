@@ -28,11 +28,25 @@ def _token_count(text: str) -> int:
     return len(_tokenize(text))
 
 
+def _force_split_by_tokens(text: str) -> list[str]:
+    """Force-split text exceeding MAX_TOKENS into overlapping token windows."""
+    tokens = _tokenize(text)
+    step = MAX_TOKENS - OVERLAP_TOKENS
+    segments: list[str] = []
+    for i in range(0, len(tokens), step):
+        window = tokens[i : i + MAX_TOKENS]
+        segments.append(" ".join(window))
+        if i + MAX_TOKENS >= len(tokens):
+            break
+    return segments
+
+
 def _split_into_segments(text: str) -> list[str]:
     """Split text into paragraph/sentence segments for chunking.
 
     First splits by paragraphs (double newlines), then if a paragraph
-    is still too large, splits by sentences.
+    is still too large, splits by sentences. Segments still exceeding
+    MAX_TOKENS are force-split by token windows.
     """
     # Split by double newlines (paragraphs)
     paragraphs = re.split(r"\n\s*\n", text)
@@ -48,8 +62,13 @@ def _split_into_segments(text: str) -> list[str]:
             sentences = re.split(r"(?<=[.!?。])\s+", para)
             for sent in sentences:
                 sent = sent.strip()
-                if sent:
+                if not sent:
+                    continue
+                if _token_count(sent) <= MAX_TOKENS:
                     segments.append(sent)
+                else:
+                    # Force-split sentences still exceeding MAX_TOKENS
+                    segments.extend(_force_split_by_tokens(sent))
     return segments
 
 

@@ -190,16 +190,42 @@ def crawl_list_pages(delay: float = DEFAULT_DELAY) -> list[dict[str, Any]]:
             logger.warning("Could not read progress file, starting from page 1.")
 
     page_num = start_page
+    consecutive_failures = 0
+    max_consecutive_failures = 3
     while True:
         logger.info("Crawling list page %d...", page_num)
 
-        try:
-            soup = _get_soup(LIST_URL, params={"code": "J_qna", "page": str(page_num)})
-        except requests.RequestException as e:
-            logger.error("Failed to fetch page %d: %s. Stopping.", page_num, e)
-            # Do not delete progress file, so it can be resumed
-            return all_posts
+        soup = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                soup = _get_soup(LIST_URL, params={"code": "J_qna", "page": str(page_num)})
+                break
+            except requests.RequestException as e:
+                if attempt < MAX_RETRIES:
+                    wait = delay * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Attempt %d failed for page %d: %s. Retrying in %.1fs...",
+                        attempt, page_num, e, wait,
+                    )
+                    time.sleep(wait)
+                else:
+                    logger.error(
+                        "All %d attempts failed for page %d: %s. Skipping.",
+                        MAX_RETRIES, page_num, e,
+                    )
 
+        if soup is None:
+            consecutive_failures += 1
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    "%d consecutive page failures. Stopping.", consecutive_failures,
+                )
+                break
+            page_num += 1
+            time.sleep(delay)
+            continue
+
+        consecutive_failures = 0
         posts_on_page = _parse_list_page(soup)
 
         if not posts_on_page and page_num > start_page:
