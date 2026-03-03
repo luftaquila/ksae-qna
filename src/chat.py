@@ -346,6 +346,24 @@ def _build_prompt(query: str, sources: list[dict]) -> str:
     return f"다음은 검색된 참고 문서입니다:\n\n{context}\n\n---\n\n사용자 질문: {query}"
 
 
+def _classify_error(e: Exception, provider: str) -> str:
+    """Return a user-friendly error message based on the exception type."""
+    msg = str(e).lower()
+
+    if "503" in msg or "unavailable" in msg or "overloaded" in msg:
+        return f"{provider} 서버가 일시적으로 과부하 상태입니다. 잠시 후 다시 시도해주세요."
+    if "429" in msg or "rate" in msg or "quota" in msg or "resource_exhausted" in msg:
+        return f"{provider} API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요."
+    if "401" in msg or "403" in msg or "permission" in msg or "authentication" in msg:
+        return f"{provider} API 인증에 실패했습니다. 관리자에게 문의해주세요."
+    if "timeout" in msg:
+        return f"{provider} 서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
+    if "400" in msg or "invalid" in msg:
+        return f"{provider} 요청 처리 중 오류가 발생했습니다. 질문을 수정하여 다시 시도해주세요."
+
+    return f"{provider} 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+
+
 async def _stream_gemini(
     contents: list,
     model_config: dict,
@@ -391,7 +409,7 @@ async def _stream_gemini(
                     thinking_tokens = um.thoughts_token_count
     except Exception as e:
         logger.exception("Gemini streaming error: %s", e)
-        error_msg = json.dumps("LLM 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", ensure_ascii=False)
+        error_msg = json.dumps(_classify_error(e, "Gemini"), ensure_ascii=False)
         yield f"event: error\ndata: {error_msg}\n\n"
 
     usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens, "thinking_tokens": thinking_tokens})
@@ -450,7 +468,7 @@ async def _stream_anthropic(
 
     except Exception as e:
         logger.exception("Anthropic streaming error: %s", e)
-        error_msg = json.dumps("LLM 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", ensure_ascii=False)
+        error_msg = json.dumps(_classify_error(e, "Claude"), ensure_ascii=False)
         yield f"event: error\ndata: {error_msg}\n\n"
 
     usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens, "thinking_tokens": thinking_tokens})
