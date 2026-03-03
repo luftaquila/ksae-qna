@@ -438,7 +438,7 @@ def crawl_all_details(
     """Crawl detail pages for all posts and build structured output.
 
     Question posts and their reply posts are matched: the reply body becomes
-    the ``answer_body`` of the preceding question post.  Reply-only posts
+    the ``answers`` list of the preceding question post.  Reply-only posts
     (those with ``is_reply=True``) are not emitted as separate entries.
 
     Args:
@@ -514,11 +514,10 @@ def crawl_all_details(
             continue
 
         question_body = detail["body"]
-        answer_parts: list[str] = []
+        answers: list[dict[str, str]] = []
 
         # Collect answer bodies from all reply posts
         reply_nums = question_answer_map.get(number, [])
-        last_reply_number: int | None = None
         for reply_number in reply_nums:
             if reply_number in detail_map:
                 reply_detail = detail_map[reply_number]
@@ -529,17 +528,14 @@ def crawl_all_details(
                 parts = re.split(separator_pattern, raw_answer, maxsplit=1)
                 cleaned = _clean_text(parts[0])
                 if cleaned:
-                    answer_parts.append(cleaned)
-                last_reply_number = reply_number
+                    answers.append({
+                        "body": cleaned,
+                        "url": f"{BASE_URL}/jajak/bbs/?number={reply_number}&mode=view&code=J_qna",
+                    })
 
-        answer_body = "\n\n".join(answer_parts)
         comments: list[str] = []
 
-        # Use last reply (answer) URL if available, so "원문 보기" links to the answer page
-        if last_reply_number and last_reply_number in detail_map:
-            url = f"{BASE_URL}/jajak/bbs/?number={last_reply_number}&mode=view&code=J_qna"
-        else:
-            url = f"{BASE_URL}{meta['detail_url']}"
+        url = f"{BASE_URL}{meta['detail_url']}"
         post_data: dict[str, Any] = {
             "id": meta["id"],
             "category": meta["category"],
@@ -548,7 +544,7 @@ def crawl_all_details(
             "date": meta["date"],
             "views": meta["views"],
             "question_body": question_body,
-            "answer_body": answer_body,
+            "answers": answers,
             "comments": comments,
             "attachments": detail["attachments"],
             "url": url,

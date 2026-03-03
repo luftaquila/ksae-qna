@@ -122,15 +122,44 @@ def _build_chunks_from_segments(
     return chunks
 
 
+def _chunk_text(
+    text: str,
+    meta: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Chunk a single text block with the given metadata."""
+    if _token_count(text) <= MAX_TOKENS:
+        return [{
+            "post_id": meta["id"],
+            "category": meta["category"],
+            "title": meta["title"],
+            "date": meta["date"],
+            "url": meta["url"],
+            "chunk_index": meta.get("chunk_index_start", 0),
+            "text": text,
+        }]
+
+    segments = _split_into_segments(text)
+    chunks = _build_chunks_from_segments(segments, meta)
+    # Offset chunk_index if needed
+    offset = meta.get("chunk_index_start", 0)
+    if offset:
+        for c in chunks:
+            c["chunk_index"] += offset
+    return chunks
+
+
+QUESTION_CONTEXT_MAX_TOKENS = 100
+
+
 def chunk_posts(
     input_path: str | Path = "data/raw/posts.json",
     output_path: str | Path = "data/processed/chunks.json",
 ) -> list[dict[str, Any]]:
     """Read crawled posts and split into RAG-optimized chunks.
 
-    For each post, combines question title + question body + answer body.
-    If the combined text fits within MAX_TOKENS, it becomes a single chunk.
-    Otherwise, it is split at paragraph/sentence boundaries with overlap.
+    Each answer is chunked independently with the question title as context,
+    so that answer content is directly retrievable via vector search.
+    Posts without answers are chunked as title + question body.
 
     Args:
         input_path: Path to the crawled posts JSON file.
@@ -150,46 +179,56 @@ def chunk_posts(
     all_chunks: list[dict[str, Any]] = []
 
     for post in posts:
-        # Combine title + question + answer into one document
-        parts: list[str] = []
-        if post.get("title"):
-            parts.append(post["title"])
-        if post.get("question_body"):
-            parts.append(post["question_body"])
-        if post.get("answer_body"):
-            parts.append(post["answer_body"])
+        title = post.get("title", "")
+        question_body = post.get("question_body", "")
+        answers: list[dict[str, str]] = post.get("answers", [])
 
-        combined = "\n\n".join(parts)
+        # Backward compat: old format with answer_body string
+        if not answers and post.get("answer_body"):
+            answers = [{"body": post["answer_body"], "url": post.get("url", "")}]
 
-        if not combined.strip():
+        if not title and not question_body and not answers:
             logger.warning("Post %s has no text content, skipping", post.get("id"))
             continue
 
-        post_meta = {
-            "id": post["id"],
-            "category": post["category"],
-            "title": post["title"],
-            "date": post["date"],
-            "url": post["url"],
-        }
-
-        token_count = _token_count(combined)
-        if token_count <= MAX_TOKENS:
-            # Single chunk for the whole post
-            all_chunks.append({
-                "post_id": post_meta["id"],
-                "category": post_meta["category"],
-                "title": post_meta["title"],
-                "date": post_meta["date"],
-                "url": post_meta["url"],
-                "chunk_index": 0,
-                "text": combined,
-            })
+        # Truncate question body for context prefix in answer chunks
+        q_tokens = _tokenize(question_body)
+        if len(q_tokens) > QUESTION_CONTEXT_MAX_TOKENS:
+            question_context = " ".join(q_tokens[:QUESTION_CONTEXT_MAX_TOKENS]) + " ..."
         else:
-            # Split into multiple chunks
-            segments = _split_into_segments(combined)
-            post_chunks = _build_chunks_from_segments(segments, post_meta)
-            all_chunks.extend(post_chunks)
+            question_context = question_body
+
+        if answers:
+            # Chunk each answer independently with question context
+            chunk_index_start = 0
+            for answer in answers:
+                answer_body = answer["body"] if isinstance(answer, dict) else answer
+                answer_url = answer["url"] if isinstance(answer, dict) else post.get("url", "")
+
+                combined = f"[질문] {title}\n{question_context}\n\n[답변]\n{answer_body}"
+                meta = {
+                    "id": post["id"],
+                    "category": post.get("category", ""),
+                    "title": title,
+                    "date": post.get("date", ""),
+                    "url": answer_url,
+                    "chunk_index_start": chunk_index_start,
+                }
+                chunks = _chunk_text(combined, meta)
+                all_chunks.extend(chunks)
+                chunk_index_start += len(chunks)
+        else:
+            # No answers: chunk question only
+            combined = "\n\n".join(filter(None, [title, question_body]))
+            meta = {
+                "id": post["id"],
+                "category": post.get("category", ""),
+                "title": title,
+                "date": post.get("date", ""),
+                "url": post.get("url", ""),
+            }
+            chunks = _chunk_text(combined, meta)
+            all_chunks.extend(chunks)
 
     # Save chunks
     output_path.parent.mkdir(parents=True, exist_ok=True)

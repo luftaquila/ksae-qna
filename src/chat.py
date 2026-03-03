@@ -236,12 +236,15 @@ def search(
     min_score: float = 0.0,
     collections: list[str] | None = None,
     category: str | None = None,
+    min_per_collection: int = 1,
 ) -> list[dict]:
     """Encode query with BGE-M3 and search Qdrant for similar chunks.
 
     *collections* is a list of short keys (``"qna"``, ``"rules"``).
     When ``None`` or empty, all collections are searched.
     *category* filters qna results by category (e.g. ``"Formula"``, ``"Baja"``, ``"EV"``).
+    *min_per_collection* guarantees at least N results from each collection
+    (if available), preventing one collection from dominating all results.
     """
     if not collections:
         collections = list(COLLECTIONS.keys())
@@ -256,7 +259,8 @@ def search(
             must=[models.FieldCondition(key="category", match=models.MatchValue(value=category))]
         )
 
-    output: list[dict] = []
+    # Collect results per collection
+    per_collection: dict[str, list[dict]] = {}
     for col_name in collection_names:
         # Only apply category filter to qna collection
         qf = category_filter if (category and col_name == COLLECTIONS.get("qna")) else None
@@ -267,6 +271,7 @@ def search(
             query_filter=qf,
         )
 
+        hits = []
         for hit in results.points:
             if hit.score < min_score:
                 continue
@@ -284,13 +289,25 @@ def search(
                 source = ""
                 url = ""
 
-            output.append({
+            hits.append({
                 "score": hit.score,
                 "source": source,
                 "url": url,
                 "content": content,
             })
 
+        hits.sort(key=lambda x: x["score"], reverse=True)
+        per_collection[col_name] = hits
+
+    # Guarantee min_per_collection from each, fill remainder by score
+    guaranteed: list[dict] = []
+    remainder: list[dict] = []
+    for col_name, hits in per_collection.items():
+        guaranteed.extend(hits[:min_per_collection])
+        remainder.extend(hits[min_per_collection:])
+
+    remainder.sort(key=lambda x: x["score"], reverse=True)
+    output = guaranteed + remainder
     output.sort(key=lambda x: x["score"], reverse=True)
     return output[:limit]
 
