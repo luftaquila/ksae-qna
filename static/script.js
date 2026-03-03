@@ -254,13 +254,14 @@ async function switchSession(id) {
           try {
             const sources = JSON.parse(msg.sources);
             renderSources(sourcesContainer, sources);
-          } catch {}
+          } catch (e) { console.warn("Failed to parse sources JSON:", e); }
         }
         answerEl.innerHTML = marked.parse(msg.content || "");
       }
     }
     scrollToBottom();
-  } catch {
+  } catch (e) {
+    console.warn("Failed to load session messages:", e);
     showWelcome();
   }
 
@@ -403,11 +404,11 @@ form.addEventListener("submit", async (e) => {
                   currentSessionId = payload.session_id;
                   loadSessions();
                 }
-              } catch {}
+              } catch (e) { console.warn("Failed to parse session event:", e); }
             } else {
               handleEvent(eventType, data, sourcesContainer, answerEl, { fullText });
               if (eventType === "token") {
-                try { fullText += JSON.parse(data); } catch {}
+                try { fullText += JSON.parse(data); } catch (e) { console.warn("Failed to parse token data:", e); }
               }
             }
             eventType = null;
@@ -436,7 +437,10 @@ function handleEvent(type, data, sourcesContainer, answerEl, state) {
     try {
       const sources = JSON.parse(data);
       renderSources(sourcesContainer, sources);
-    } catch {}
+      // Update loading text to indicate answer generation
+      const dots = answerEl.querySelector(".loading-dots");
+      if (dots) dots.textContent = "답변 생성 중";
+    } catch (e) { console.warn("Failed to parse sources event:", e); }
   } else if (type === "token") {
     try {
       const token = JSON.parse(data);
@@ -444,7 +448,7 @@ function handleEvent(type, data, sourcesContainer, answerEl, state) {
       // Incremental markdown render
       answerEl.innerHTML = marked.parse(state.fullText);
       scrollToBottom();
-    } catch {}
+    } catch (e) { console.warn("Failed to parse token event:", e); }
   }
 }
 
@@ -461,7 +465,7 @@ function appendAssistantShell() {
   el.className = "msg assistant";
   el.innerHTML = `
     <div class="sources"></div>
-    <div class="answer"><span class="loading-dots">답변 생성 중</span></div>
+    <div class="answer"><span class="loading-dots">검색 중</span></div>
   `;
   chat.appendChild(el);
   scrollToBottom();
@@ -547,7 +551,8 @@ async function loadModels() {
 
 function renderModelSelect() {
   const select = document.getElementById("model-select");
-  const prev = select.value;
+  const saved = localStorage.getItem("selectedModel");
+  const prev = select.value || saved;
   select.innerHTML = "";
   for (const m of availableModels) {
     const opt = document.createElement("option");
@@ -564,6 +569,7 @@ function renderModelSelect() {
     const first = availableModels.find((m) => m.available);
     if (first) select.value = first.id;
   }
+  localStorage.setItem("selectedModel", select.value);
 }
 
 // ---------------------------------------------------------------------------
@@ -650,3 +656,8 @@ qnaCheckbox.addEventListener("change", syncCategoryState);
 initTheme();
 loadModels().then(() => showWelcome());
 checkAuth();
+
+// Persist model selection on change (registered once)
+document.getElementById("model-select").addEventListener("change", (e) => {
+  localStorage.setItem("selectedModel", e.target.value);
+});
