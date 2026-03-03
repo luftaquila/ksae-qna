@@ -21,6 +21,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from src.auth import (
     add_credits,
     add_message,
+    get_user_by_id,
     refund_credit,
     admin_get_messages,
     admin_set_credits,
@@ -311,7 +312,8 @@ async def chat(request: Request, req: ChatRequest):
     if not deduct_credit(user["id"], credits_needed, f"질문 ({model_label})"):
         return JSONResponse({"error": "크레딧이 부족합니다"}, status_code=402)
 
-    remaining = user["credits"] - credits_needed
+    updated_user = get_user_by_id(user["id"])
+    remaining = updated_user["credits"] if updated_user else 0
 
     # Resolve or create session
     session_id = req.session_id
