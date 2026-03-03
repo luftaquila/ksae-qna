@@ -297,10 +297,12 @@ def filter_new_posts(post_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for i, meta in enumerate(post_list):
         if meta["number"] in new_question_numbers:
             new_post_list.append(meta)
-        elif meta["is_reply"] and i > 0:
-            prev = post_list[i - 1]
-            if prev["number"] in new_question_numbers:
-                new_post_list.append(meta)
+        elif meta["is_reply"]:
+            for j in range(i - 1, -1, -1):
+                if not post_list[j]["is_reply"]:
+                    if post_list[j]["number"] in new_question_numbers:
+                        new_post_list.append(meta)
+                    break
 
     logger.info("Filtered to %d new posts (including replies)", len(new_post_list))
     return new_post_list
@@ -526,6 +528,12 @@ def crawl_all_details(
                 # Extract only the answer part (before the separator).
                 separator_pattern = r"={10,}\s*원\s*글\s*={10,}"
                 parts = re.split(separator_pattern, raw_answer, maxsplit=1)
+                if len(parts) == 1:
+                    logger.warning(
+                        "Answer separator not found for reply number=%d (question number=%d). "
+                        "Raw answer may include original question text.",
+                        reply_number, number,
+                    )
                 cleaned = _clean_text(parts[0])
                 if cleaned:
                     answers.append({
