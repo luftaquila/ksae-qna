@@ -251,16 +251,21 @@ def _search_collection(
     """Search a single Qdrant collection and return formatted hits."""
     try:
         if query_text is not None:
-            # Hybrid search: dense + full-text with RRF fusion
+            # Hybrid search: dense + dense-with-text-filter, fused with RRF
+            text_conditions = [
+                models.FieldCondition(key="content", match=models.MatchText(text=query_text))
+            ]
+            if qf is not None:
+                text_conditions.extend(qf.must or [])
+            text_filter = models.Filter(must=text_conditions)
             results = _qdrant.query_points(
                 collection_name=col_name,
                 prefetch=[
-                    models.Prefetch(query=vector, limit=limit * 2),
-                    models.Prefetch(query=query_text, limit=limit * 2, using="content"),
+                    models.Prefetch(query=vector, limit=limit * 2, filter=qf),
+                    models.Prefetch(query=vector, limit=limit * 2, filter=text_filter),
                 ],
                 query=models.FusionQuery(fusion=models.Fusion.RRF),
                 limit=limit,
-                query_filter=qf,
             )
         else:
             results = _qdrant.query_points(
@@ -287,9 +292,12 @@ def _search_collection(
             logger.error("Qdrant query failed for '%s': %s", col_name, e)
             return []
 
+    # RRF scores use a different scale than cosine similarity;
+    # skip min_score for hybrid results (quality is ensured by dense prefetches)
+    is_hybrid = query_text is not None
     hits = []
     for hit in results.points:
-        if hit.score < min_score:
+        if not is_hybrid and hit.score < min_score:
             continue
 
         payload = hit.payload or {}
