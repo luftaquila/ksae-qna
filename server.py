@@ -34,6 +34,7 @@ from src.auth import (
     get_all_site_settings,
     get_current_user,
     get_messages,
+    get_recent_messages,
     get_site_setting,
     get_all_users_token_usage_by_model,
     get_user_token_usage_by_model,
@@ -338,7 +339,7 @@ async def chat(request: Request, req: ChatRequest):
     # Fetch recent history (last 5 turns = 10 messages) before persisting current user message
     history = []
     if req.session_id:
-        prev_messages = get_messages(session_id)
+        prev_messages = get_recent_messages(session_id)
         # Take last 10 messages (5 user + 5 assistant turns)
         for msg in prev_messages[-10:]:
             history.append({"role": msg["role"], "content": msg["content"]})

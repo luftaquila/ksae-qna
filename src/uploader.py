@@ -147,6 +147,20 @@ def upload_to_qdrant(
     logger.info("Created keyword index on 'category' field")
     print("Created keyword index on 'category' field")
 
+    # Create full-text index on content for hybrid search
+    from qdrant_client.models import TextIndexParams, TokenizerType
+    client.create_payload_index(
+        collection_name=collection_name,
+        field_name="content",
+        field_schema=TextIndexParams(
+            type="text",
+            tokenizer=TokenizerType.MULTILINGUAL,
+            min_token_len=2,
+        ),
+    )
+    logger.info("Created full-text index on 'content' field")
+    print("Created full-text index on 'content' field")
+
     # Print collection info
     collection_info = client.get_collection(collection_name)
     print(f"Collection info: {collection_info.points_count} points, "

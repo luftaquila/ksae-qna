@@ -3,11 +3,14 @@ RAG search + multi-model LLM streaming for KSAE Q&A chatbot.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
+import time
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import anthropic
 
@@ -35,6 +38,12 @@ COLLECTIONS = {
     "rules": "ksae-formula-rules",
 }
 _STREAM_DONE = object()
+
+# Search cache: key -> (timestamp, results)
+_search_cache: dict[str, tuple[float, list[dict]]] = {}
+_CACHE_TTL = 300  # seconds
+_CACHE_MAX = 100
+MAX_CHUNKS_PER_POST = 2
 
 MODEL_CONFIG = {
     "gemini-3-flash": {
@@ -231,6 +240,85 @@ def get_all_models_admin() -> list[dict]:
     return result
 
 
+def _search_collection(
+    vector: list[float],
+    col_name: str,
+    limit: int,
+    min_score: float,
+    qf: models.Filter | None,
+    query_text: str | None = None,
+) -> list[dict]:
+    """Search a single Qdrant collection and return formatted hits."""
+    try:
+        if query_text is not None:
+            # Hybrid search: dense + full-text with RRF fusion
+            results = _qdrant.query_points(
+                collection_name=col_name,
+                prefetch=[
+                    models.Prefetch(query=vector, limit=limit * 2),
+                    models.Prefetch(query=query_text, limit=limit * 2, using="content"),
+                ],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=limit,
+                query_filter=qf,
+            )
+        else:
+            results = _qdrant.query_points(
+                collection_name=col_name,
+                query=vector,
+                limit=limit,
+                query_filter=qf,
+            )
+    except Exception as e:
+        if query_text is not None:
+            # Fallback to dense-only search if hybrid fails (e.g., no text index)
+            logger.warning("Hybrid search failed for '%s', falling back to dense: %s", col_name, e)
+            try:
+                results = _qdrant.query_points(
+                    collection_name=col_name,
+                    query=vector,
+                    limit=limit,
+                    query_filter=qf,
+                )
+            except Exception as e2:
+                logger.error("Dense search also failed for '%s': %s", col_name, e2)
+                return []
+        else:
+            logger.error("Qdrant query failed for '%s': %s", col_name, e)
+            return []
+
+    hits = []
+    for hit in results.points:
+        if hit.score < min_score:
+            continue
+
+        payload = hit.payload or {}
+        content = payload.get("content", "") or payload.get("chunk_text", "")
+
+        if "title" in payload:
+            source = f"[{payload.get('category', '')}] {payload['title']}"
+            url = payload.get("url", "")
+        elif "chapter" in payload:
+            source = f"제{payload.get('chapter_num', '')}장 {payload.get('chapter', '')} > {payload.get('section', '')}"
+            url = ""
+        else:
+            source = ""
+            url = ""
+
+        hit_item = {
+            "score": hit.score,
+            "source": source,
+            "url": url,
+            "content": content,
+        }
+        if "id" in payload:
+            hit_item["post_id"] = payload["id"]
+        hits.append(hit_item)
+
+    hits.sort(key=lambda x: x["score"], reverse=True)
+    return hits
+
+
 def search(
     query: str,
     limit: int = 5,
@@ -251,6 +339,15 @@ def search(
         collections = list(COLLECTIONS.keys())
     collection_names = [COLLECTIONS[k] for k in collections if k in COLLECTIONS]
 
+    # Check cache
+    cache_key = hashlib.sha256(
+        f"{query}|{limit}|{min_score}|{','.join(sorted(collections))}|{category}".encode()
+    ).hexdigest()
+    now = time.monotonic()
+    cached = _search_cache.get(cache_key)
+    if cached and (now - cached[0]) < _CACHE_TTL:
+        return cached[1]
+
     vector = _model.encode(query).tolist()
 
     # Build category filter for qna collection
@@ -260,54 +357,18 @@ def search(
             must=[models.FieldCondition(key="category", match=models.MatchValue(value=category))]
         )
 
-    # Collect results per collection
+    # Parallel search across collections
     per_collection: dict[str, list[dict]] = {}
-    for col_name in collection_names:
-        # Only apply category filter to qna collection
-        qf = category_filter if (category and col_name == COLLECTIONS.get("qna")) else None
-        try:
-            results = _qdrant.query_points(
-                collection_name=col_name,
-                query=vector,
-                limit=limit,
-                query_filter=qf,
-            )
-        except Exception as e:
-            logger.error("Qdrant query failed for collection '%s': %s", col_name, e)
-            per_collection[col_name] = []
-            continue
+    with ThreadPoolExecutor(max_workers=len(collection_names)) as executor:
+        futures = {}
+        for col_name in collection_names:
+            qf = category_filter if (category and col_name == COLLECTIONS.get("qna")) else None
+            future = executor.submit(_search_collection, vector, col_name, limit, min_score, qf, query)
+            futures[future] = col_name
 
-        hits = []
-        for hit in results.points:
-            if hit.score < min_score:
-                continue
-
-            payload = hit.payload or {}
-            content = payload.get("content", "") or payload.get("chunk_text", "")
-
-            if "title" in payload:
-                source = f"[{payload.get('category', '')}] {payload['title']}"
-                url = payload.get("url", "")
-            elif "chapter" in payload:
-                source = f"제{payload.get('chapter_num', '')}장 {payload.get('chapter', '')} > {payload.get('section', '')}"
-                url = ""
-            else:
-                source = ""
-                url = ""
-
-            hit_item = {
-                "score": hit.score,
-                "source": source,
-                "url": url,
-                "content": content,
-            }
-            # Track post_id for qna deduplication
-            if "id" in payload:
-                hit_item["post_id"] = payload["id"]
-            hits.append(hit_item)
-
-        hits.sort(key=lambda x: x["score"], reverse=True)
-        per_collection[col_name] = hits
+        for future in as_completed(futures):
+            col_name = futures[future]
+            per_collection[col_name] = future.result()
 
     # Guarantee min_per_collection from each, fill remainder by score
     guaranteed: list[dict] = []
@@ -321,16 +382,24 @@ def search(
     output = guaranteed + remainder[:remaining_slots]
     output.sort(key=lambda x: x["score"], reverse=True)
 
-    # Deduplicate: keep only the highest-score chunk per post
-    seen_posts: set = set()
+    # Deduplicate: allow up to MAX_CHUNKS_PER_POST per post
+    seen_posts: dict[int, int] = {}
     deduped: list[dict] = []
     for item in output:
         pid = item.get("post_id")
         if pid is not None:
-            if pid in seen_posts:
+            count = seen_posts.get(pid, 0)
+            if count >= MAX_CHUNKS_PER_POST:
                 continue
-            seen_posts.add(pid)
+            seen_posts[pid] = count + 1
         deduped.append(item)
+
+    # Update cache (evict oldest if full)
+    if len(_search_cache) >= _CACHE_MAX:
+        oldest_key = min(_search_cache, key=lambda k: _search_cache[k][0])
+        del _search_cache[oldest_key]
+    _search_cache[cache_key] = (now, deduped)
+
     return deduped
 
 
@@ -574,6 +643,77 @@ async def _stream_anthropic(
     yield f"event: usage\ndata: {usage_data}\n\n"
 
 
+_CATEGORY_PATTERNS = {
+    "Formula": re.compile(r"포뮬러|formula|포뮬라", re.IGNORECASE),
+    "Baja": re.compile(r"바하|baja", re.IGNORECASE),
+    "EV": re.compile(r"\bev\b|전기|electric", re.IGNORECASE),
+}
+
+
+def _detect_category(query: str) -> str | None:
+    """Detect competition category from query keywords."""
+    for category, pattern in _CATEGORY_PATTERNS.items():
+        if pattern.search(query):
+            return category
+    return None
+
+
+async def _rerank_results(query: str, sources: list[dict]) -> list[dict]:
+    """Re-rank search results using LLM-based relevance scoring."""
+    if not sources or len(sources) <= 1:
+        return sources
+
+    docs = []
+    for i, s in enumerate(sources):
+        docs.append(f"[{i}] {s['source']}\n{s['content'][:300]}")
+    docs_text = "\n\n".join(docs)
+
+    prompt = f"""다음 검색 결과들의 질문에 대한 관련성을 0-10 점수로 평가하세요.
+JSON 배열로만 응답하세요: [{{"index": 0, "score": 8}}, ...]
+
+질문: {query}
+
+검색 결과:
+{docs_text}"""
+
+    try:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: _gemini.models.generate_content(
+                model="gemini-3-flash-preview",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=200,
+                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+                ),
+            ),
+        )
+        text = response.text.strip()
+        # Extract JSON array from response
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if not match:
+            return sources
+        scores = json.loads(match.group())
+        score_map = {item["index"]: item["score"] for item in scores}
+
+        # Filter low-relevance results and re-sort
+        reranked = []
+        for i, s in enumerate(sources):
+            relevance = score_map.get(i, 5)
+            if relevance >= 5:
+                s["_relevance"] = relevance
+                reranked.append(s)
+        reranked.sort(key=lambda x: x.get("_relevance", 0), reverse=True)
+        for s in reranked:
+            s.pop("_relevance", None)
+        return reranked if reranked else sources
+    except Exception as e:
+        logger.warning("Re-ranking failed, using original results: %s", e)
+        return sources
+
+
 async def search_and_stream(
     query: str,
     limit: int = 5,
@@ -604,8 +744,15 @@ async def search_and_stream(
         search_query = rewritten
         yield f"event: rewrite\ndata: {json.dumps(rewritten, ensure_ascii=False)}\n\n"
 
+    # Auto-detect category if not explicitly specified
+    if not category:
+        category = _detect_category(search_query) or _detect_category(query)
+
     # Step 2: Search with (possibly rewritten) query
     sources = search(search_query, limit, min_score, collections, category)
+
+    # Re-rank results for relevance
+    sources = await _rerank_results(search_query, sources)
 
     # Yield sources event
     yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"

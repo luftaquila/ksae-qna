@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 _tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3")
 
-MAX_TOKENS = 512
-OVERLAP_TOKENS = 50
+MAX_TOKENS = 384
+OVERLAP_TOKENS = 75
 
 
 def _token_count(text: str) -> int:

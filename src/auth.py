@@ -183,6 +183,9 @@ def init_db() -> None:
     except sqlite3.OperationalError:
         pass  # column already exists
 
+    # Index for efficient recent messages query
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages (session_id, created_at)")
+
     conn.commit()
     conn.close()
 
@@ -540,6 +543,17 @@ def get_messages(session_id: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_recent_messages(session_id: int, limit: int = 10) -> list[dict]:
+    """Return the most recent *limit* messages for a session, ordered ASC."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+        (session_id, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in reversed(rows)]
 
 
 # ---------------------------------------------------------------------------
