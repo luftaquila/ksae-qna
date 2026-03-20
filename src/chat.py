@@ -345,6 +345,15 @@ def _build_prompt(query: str, sources: list[dict], search_query: str | None = No
 
     context = "\n\n---\n\n".join(context_parts)
     prompt = f"다음은 검색된 참고 문서입니다:\n\n{context}\n\n---\n\n"
+
+    # Warn LLM when search results are weak
+    if sources:
+        max_score = max(s["score"] for s in sources)
+        if max_score < 0.6:
+            prompt += "⚠️ 검색 결과의 유사도가 전반적으로 낮습니다. 검색 결과가 질문과 직접적으로 관련이 없을 수 있으니, 관련 정보가 부족하다면 솔직히 알려주세요.\n"
+    else:
+        prompt += "⚠️ 검색 결과가 없습니다. 관련 정보를 찾지 못했다고 안내해주세요.\n"
+
     if search_query and search_query != query:
         prompt += f"(검색에 사용된 쿼리: {search_query})\n"
     prompt += f"사용자 질문: {query}"
@@ -359,13 +368,13 @@ async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
     if not history:
         return None
 
-    # Build condensed history (last 6 messages, assistant truncated to 200 chars)
+    # Build condensed history (last 6 messages, assistant truncated to 500 chars)
     history_lines = []
     for msg in history[-6:]:
         role = "사용자" if msg["role"] == "user" else "어시스턴트"
         content = msg["content"]
-        if msg["role"] == "assistant" and len(content) > 200:
-            content = content[:200] + "..."
+        if msg["role"] == "assistant" and len(content) > 500:
+            content = content[:500] + "..."
         history_lines.append(f"{role}: {content}")
 
     history_text = "\n".join(history_lines)
@@ -373,10 +382,15 @@ async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
     prompt = f"""대화 기록과 후속 질문을 바탕으로, 벡터 검색에 사용할 독립적인 검색 쿼리를 작성하세요.
 
 규칙:
-- 대명사(그것, 이것, 그 규정 등)와 생략된 주어를 구체적인 명사로 대체하세요.
-- 대화 맥락을 반영하여 검색에 필요한 핵심 키워드를 포함하세요.
+- 대명사(그것, 이것, 그 규정 등)와 생략된 주어를 대화에서 언급된 구체적인 명사로 대체하세요.
+- 대화에서 다룬 핵심 주제와 키워드를 반드시 검색 쿼리에 포함하세요.
 - 후속 질문이 이미 독립적이라면 그대로 반환하세요.
+- 검색 쿼리는 자연스러운 한국어 문장이나 구(phrase)로 작성하세요. 단어 1~2개로 축약하지 마세요.
 - 검색 쿼리만 출력하고, 설명이나 부가 텍스트는 추가하지 마세요.
+
+예시:
+- 대화: "방화벽이 뭐야?" → 어시스턴트 답변 → 후속: "그 규정에 대해 더 알려줘" → 쿼리: "방화벽 규정 상세 내용"
+- 대화: "5인치 휠 사용 가능한지" → 어시스턴트 답변 → 후속: "포뮬러 기준" → 쿼리: "포뮬러 5인치 휠 타이어 사용 규정"
 
 대화 기록:
 {history_text}
@@ -390,17 +404,18 @@ async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
         response = await loop.run_in_executor(
             None,
             lambda: _gemini.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3-flash-preview",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.0,
                     max_output_tokens=150,
+                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
                 ),
             ),
         )
         rewritten = response.text.strip()
+        logger.warning("Query rewrite: '%s' -> '%s'", query, rewritten)
         if rewritten and rewritten != query:
-            logger.info("Query rewritten: '%s' -> '%s'", query, rewritten)
             return rewritten
         return None
     except Exception as e:
