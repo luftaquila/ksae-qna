@@ -53,12 +53,17 @@ async function checkAdmin() {
 // ---------------------------------------------------------------------------
 // Tabs
 // ---------------------------------------------------------------------------
+let convLoaded = false;
 document.querySelectorAll(".admin-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     document.querySelectorAll(".admin-tab").forEach((t) => t.classList.remove("active"));
     document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
     tab.classList.add("active");
     document.getElementById(`tab-${tab.dataset.tab}`).classList.add("active");
+    if (tab.dataset.tab === "conversations" && !convLoaded) {
+      convLoaded = true;
+      loadSessions("");
+    }
   });
 });
 
@@ -477,15 +482,9 @@ convUserSelect.addEventListener("change", () => {
 });
 
 async function loadSessions(userId) {
-  if (!userId) {
-    convSessionList.innerHTML = "";
-    convMessages.innerHTML = `<div class="conv-empty">사용자를 선택하세요</div>`;
-    currentConvSessionId = null;
-    return;
-  }
-
   try {
-    const res = await fetch(`/api/admin/users/${userId}/sessions`);
+    const url = userId ? `/api/admin/users/${userId}/sessions` : `/api/admin/sessions`;
+    const res = await fetch(url);
     const data = await res.json();
     const sessions = data.sessions || [];
     renderSessionList(sessions);
@@ -496,7 +495,7 @@ async function loadSessions(userId) {
 
 function renderSessionList(sessions) {
   currentConvSessionId = null;
-  convMessages.innerHTML = `<div class="conv-empty">세션을 선택하세요</div>`;
+  convMessages.innerHTML = `<div class="conv-empty">대화를 선택하세요</div>`;
 
   convSessionList.innerHTML = sessions
     .map((s) => {

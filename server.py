@@ -506,6 +506,13 @@ async def admin_user_transactions(user_id: int, request: Request):
     return {"transactions": get_transactions(user_id, limit=100)}
 
 
+@app.get("/api/admin/sessions")
+async def admin_all_sessions(request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    return {"sessions": list_all_sessions()}
+
+
 @app.get("/api/admin/users/{user_id}/sessions")
 async def admin_user_sessions(user_id: int, request: Request):
     if not is_admin(request):
