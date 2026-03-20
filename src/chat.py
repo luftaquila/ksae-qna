@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from collections.abc import AsyncIterator
 
 import anthropic
@@ -333,7 +334,7 @@ def search(
     return deduped
 
 
-def _build_prompt(query: str, sources: list[dict]) -> str:
+def _build_prompt(query: str, sources: list[dict], search_query: str | None = None) -> str:
     """Build the user prompt with search context."""
     context_parts = []
     for i, s in enumerate(sources, 1):
@@ -343,7 +344,89 @@ def _build_prompt(query: str, sources: list[dict]) -> str:
         context_parts.append(f"{header}\n{s['content']}")
 
     context = "\n\n---\n\n".join(context_parts)
-    return f"다음은 검색된 참고 문서입니다:\n\n{context}\n\n---\n\n사용자 질문: {query}"
+    prompt = f"다음은 검색된 참고 문서입니다:\n\n{context}\n\n---\n\n"
+    if search_query and search_query != query:
+        prompt += f"(검색에 사용된 쿼리: {search_query})\n"
+    prompt += f"사용자 질문: {query}"
+    return prompt
+
+
+async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
+    """Rewrite a follow-up query into a standalone search query using conversation history.
+
+    Returns the rewritten query, or None if rewriting was skipped or failed.
+    """
+    if not history:
+        return None
+
+    # Build condensed history (last 6 messages, assistant truncated to 200 chars)
+    history_lines = []
+    for msg in history[-6:]:
+        role = "사용자" if msg["role"] == "user" else "어시스턴트"
+        content = msg["content"]
+        if msg["role"] == "assistant" and len(content) > 200:
+            content = content[:200] + "..."
+        history_lines.append(f"{role}: {content}")
+
+    history_text = "\n".join(history_lines)
+
+    prompt = f"""대화 기록과 후속 질문을 바탕으로, 벡터 검색에 사용할 독립적인 검색 쿼리를 작성하세요.
+
+규칙:
+- 대명사(그것, 이것, 그 규정 등)와 생략된 주어를 구체적인 명사로 대체하세요.
+- 대화 맥락을 반영하여 검색에 필요한 핵심 키워드를 포함하세요.
+- 후속 질문이 이미 독립적이라면 그대로 반환하세요.
+- 검색 쿼리만 출력하고, 설명이나 부가 텍스트는 추가하지 마세요.
+
+대화 기록:
+{history_text}
+
+후속 질문: {query}
+
+검색 쿼리:"""
+
+    try:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: _gemini.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=150,
+                ),
+            ),
+        )
+        rewritten = response.text.strip()
+        if rewritten and rewritten != query:
+            logger.info("Query rewritten: '%s' -> '%s'", query, rewritten)
+            return rewritten
+        return None
+    except Exception as e:
+        logger.warning("Query rewrite failed, using original: %s", e)
+        return None
+
+
+def _compress_history(history: list[dict]) -> list[dict]:
+    """Compress assistant messages by removing URLs, document references, and scores, then truncating."""
+    compressed = []
+    for msg in history:
+        if msg["role"] == "user":
+            compressed.append(msg)
+            continue
+
+        content = msg["content"]
+        content = re.sub(r'https?://\S+', '', content)
+        content = re.sub(r'\[문서\s*\d+\]', '', content)
+        content = re.sub(r'\(유사도:\s*[\d.]+%?\)', '', content)
+        content = re.sub(r'\n{3,}', '\n\n', content).strip()
+        if len(content) > 500:
+            content = content[:500] + "..."
+
+        compressed.append({"role": msg["role"], "content": content})
+
+    return compressed
 
 
 def _classify_error(e: Exception, provider: str) -> str:
@@ -421,9 +504,10 @@ async def _stream_anthropic(
     query: str,
     sources: list[dict],
     history: list[dict] | None = None,
+    search_query: str | None = None,
 ) -> AsyncIterator[str]:
     """Stream from Anthropic and yield SSE events (token / usage)."""
-    user_prompt = _build_prompt(query, sources)
+    user_prompt = _build_prompt(query, sources, search_query)
 
     # Build messages in Anthropic format
     messages = []
@@ -486,6 +570,7 @@ async def search_and_stream(
 ) -> AsyncIterator[str]:
     """
     Async generator that yields SSE-formatted events:
+      - event: rewrite  (rewritten search query, if applicable)
       - event: sources  (JSON array of search results)
       - event: token    (single text token from LLM)
       - event: usage    (token usage metadata)
@@ -497,18 +582,28 @@ async def search_and_stream(
     """
     model_config = MODEL_CONFIG[model]
 
-    # Step 1: Search
-    sources = search(query, limit, min_score, collections, category)
+    # Step 1: Rewrite query for better search if we have conversation history
+    search_query = query
+    rewritten = await _rewrite_query(query, history)
+    if rewritten:
+        search_query = rewritten
+        yield f"event: rewrite\ndata: {json.dumps(rewritten, ensure_ascii=False)}\n\n"
+
+    # Step 2: Search with (possibly rewritten) query
+    sources = search(search_query, limit, min_score, collections, category)
 
     # Yield sources event
     yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
 
-    # Step 2: Stream from the selected provider
+    # Compress history for LLM context
+    compressed = _compress_history(history) if history else history
+
+    # Step 3: Stream from the selected provider
     if model_config["provider"] == "gemini":
         # Build Gemini contents
-        user_prompt = _build_prompt(query, sources)
+        user_prompt = _build_prompt(query, sources, search_query if rewritten else None)
         contents = []
-        for msg in history or []:
+        for msg in compressed or []:
             role = "model" if msg["role"] == "assistant" else "user"
             contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
         contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
@@ -523,7 +618,7 @@ async def search_and_stream(
             usage_data = json.dumps({"input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0})
             yield f"event: usage\ndata: {usage_data}\n\n"
         else:
-            async for event in _stream_anthropic(model_config, query, sources, history):
+            async for event in _stream_anthropic(model_config, query, sources, compressed, search_query if rewritten else None):
                 yield event
 
     yield "event: done\ndata: {}\n\n"

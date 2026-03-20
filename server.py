@@ -335,12 +335,12 @@ async def chat(request: Request, req: ChatRequest):
         session = create_session(user["id"], title)
         session_id = session["id"]
 
-    # Fetch recent history (last 3 turns = 6 messages) before persisting current user message
+    # Fetch recent history (last 5 turns = 10 messages) before persisting current user message
     history = []
     if req.session_id:
         prev_messages = get_messages(session_id)
-        # Take last 6 messages (3 user + 3 assistant turns)
-        for msg in prev_messages[-6:]:
+        # Take last 10 messages (5 user + 5 assistant turns)
+        for msg in prev_messages[-10:]:
             history.append({"role": msg["role"], "content": msg["content"]})
 
     # Persist user message
@@ -362,6 +362,7 @@ async def chat(request: Request, req: ChatRequest):
         output_tokens = None
         thinking_tokens = None
         has_error = False
+        rewritten_query = None
 
         try:
             async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections, category=req.category, model=req.model):
@@ -394,13 +395,19 @@ async def chat(request: Request, req: ChatRequest):
                         thinking_tokens = usage.get("thinking_tokens")
                     except Exception:
                         pass
+                elif event.startswith("event: rewrite"):
+                    try:
+                        data_line = event.split("\n")[1]
+                        rewritten_query = json.loads(data_line[6:])
+                    except Exception:
+                        pass
         except Exception:
             logger.exception("LLM streaming error in background task")
         finally:
             if has_error:
                 refund_credit(user["id"], credits_needed, f"오류 환불 ({model_label})")
 
-            add_message(session_id, "assistant", full_text, sources_json, input_tokens, output_tokens, thinking_tokens, model=req.model)
+            add_message(session_id, "assistant", full_text, sources_json, input_tokens, output_tokens, thinking_tokens, model=req.model, rewritten_query=rewritten_query)
 
             await queue.put(f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n")
             await queue.put(None)  # sentinel: stream finished

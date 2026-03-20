@@ -137,6 +137,12 @@ def init_db() -> None:
     except sqlite3.OperationalError:
         pass  # column already exists
 
+    # Migrate: add rewritten_query column to messages
+    try:
+        conn.execute("ALTER TABLE messages ADD COLUMN rewritten_query TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
     # Migrate: add soft-delete column to sessions
     try:
         conn.execute("ALTER TABLE sessions ADD COLUMN deleted_at TEXT")
@@ -511,11 +517,12 @@ def add_message(
     output_tokens: int | None = None,
     thinking_tokens: int | None = None,
     model: str | None = None,
+    rewritten_query: str | None = None,
 ) -> dict:
     conn = _get_conn()
     cur = conn.execute(
-        "INSERT INTO messages (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens, model),
+        "INSERT INTO messages (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens, model, rewritten_query) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens, model, rewritten_query),
     )
     conn.execute(
         "UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", (session_id,)

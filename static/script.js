@@ -441,7 +441,13 @@ form.addEventListener("submit", async (e) => {
 });
 
 function handleEvent(type, data, sourcesContainer, answerEl, state) {
-  if (type === "sources") {
+  if (type === "rewrite") {
+    try {
+      const rewritten = JSON.parse(data);
+      const dots = answerEl.querySelector(".loading-dots");
+      if (dots) dots.textContent = `검색 중: ${rewritten}`;
+    } catch (e) { console.warn("Failed to parse rewrite event:", e); }
+  } else if (type === "sources") {
     try {
       const sources = JSON.parse(data);
       renderSources(sourcesContainer, sources);
