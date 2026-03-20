@@ -168,15 +168,16 @@ def embed(ctx: click.Context) -> None:
 
 
 @cli.command()
+@click.option("--recreate", is_flag=True, default=False, help="Delete and recreate the collection before uploading.")
 @click.pass_context
-def upload(ctx: click.Context) -> None:
+def upload(ctx: click.Context, recreate: bool) -> None:
     """Run the upload stage."""
     from src.uploader import upload_to_qdrant
 
     qdrant_url: str = ctx.obj["qdrant_url"]
     qdrant_api_key: str | None = ctx.obj["qdrant_api_key"]
     collection: str = ctx.obj["collection"]
-    _run_stage("upload", upload_to_qdrant, qdrant_url=qdrant_url, api_key=qdrant_api_key, collection_name=collection)
+    _run_stage("upload", upload_to_qdrant, qdrant_url=qdrant_url, api_key=qdrant_api_key, collection_name=collection, recreate=recreate)
 
 
 if __name__ == "__main__":
