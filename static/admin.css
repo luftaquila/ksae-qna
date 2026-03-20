@@ -228,6 +228,29 @@
   z-index: 1;
 }
 
+.users-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.users-table th.sortable:hover {
+  color: var(--text-primary);
+}
+
+.users-table th.sortable.sorted {
+  color: var(--text-primary);
+}
+
+.users-table th .sort-icon {
+  font-size: 0.65rem;
+  opacity: 0.8;
+}
+
+.last-active-cell {
+  white-space: nowrap;
+}
+
 .users-table tr:hover td {
   background: var(--bg-hover);
 }
@@ -1011,7 +1034,7 @@
   /* Users table: horizontal scroll */
   .users-table {
     font-size: 0.78rem;
-    min-width: 700px;
+    min-width: 800px;
   }
 
   .users-table th,

@@ -9,6 +9,8 @@ let allUsers = [];
 let allModels = [];
 let currentConvSessionId = null;
 let lowCreditThreshold = 5;
+let sortColumn = null;
+let sortDirection = "asc";
 
 // ---------------------------------------------------------------------------
 // Theme (reused from script.js)
@@ -76,11 +78,62 @@ async function loadUsers() {
   populateUserFilter();
 }
 
+function sortUsers(users) {
+  if (!sortColumn) return users;
+  const sorted = [...users];
+  sorted.sort((a, b) => {
+    let va, vb;
+    switch (sortColumn) {
+      case "name":
+        va = (a.name || "").toLowerCase();
+        vb = (b.name || "").toLowerCase();
+        return va < vb ? -1 : va > vb ? 1 : 0;
+      case "email":
+        va = (a.email || "").toLowerCase();
+        vb = (b.email || "").toLowerCase();
+        return va < vb ? -1 : va > vb ? 1 : 0;
+      case "credits":
+        return (a.credits || 0) - (b.credits || 0);
+      case "tokens":
+        va = (a.total_input_tokens || 0) + (a.total_output_tokens || 0) + (a.total_thinking_tokens || 0);
+        vb = (b.total_input_tokens || 0) + (b.total_output_tokens || 0) + (b.total_thinking_tokens || 0);
+        return va - vb;
+      case "last_active":
+        va = a.last_active_at || "";
+        vb = b.last_active_at || "";
+        return va < vb ? -1 : va > vb ? 1 : 0;
+      case "created":
+        va = a.created_at || "";
+        vb = b.created_at || "";
+        return va < vb ? -1 : va > vb ? 1 : 0;
+      default:
+        return 0;
+    }
+  });
+  if (sortDirection === "desc") sorted.reverse();
+  return sorted;
+}
+
+function updateSortIcons() {
+  document.querySelectorAll(".users-table th.sortable").forEach((th) => {
+    const icon = th.querySelector(".sort-icon");
+    if (th.dataset.sort === sortColumn) {
+      icon.textContent = sortDirection === "asc" ? " \u25B2" : " \u25BC";
+      th.classList.add("sorted");
+    } else {
+      icon.textContent = "";
+      th.classList.remove("sorted");
+    }
+  });
+}
+
 function renderUsers(filter = "") {
   const q = filter.toLowerCase();
-  const filtered = q
+  let filtered = q
     ? allUsers.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
     : allUsers;
+  filtered = sortUsers(filtered);
+  updateSortIcons();
 
   usersTbody.innerHTML = filtered
     .map((u) => {
@@ -88,6 +141,8 @@ function renderUsers(filter = "") {
         ? `<img src="${escapeAttr(u.picture)}" class="user-picture" referrerpolicy="no-referrer">`
         : "";
       const date = u.created_at ? formatLocal(u.created_at) : "";
+      const lastActive = u.last_active_at ? formatRelative(u.last_active_at) : "-";
+      const lastActiveTitle = u.last_active_at ? formatLocal(u.last_active_at) : "";
       const lowClass = u.credits <= lowCreditThreshold ? " low" : "";
       const totalIn = u.total_input_tokens || 0;
       const totalOut = u.total_output_tokens || 0;
@@ -110,6 +165,7 @@ function renderUsers(filter = "") {
             <span class="api-cost-chip">${cost}</span>
           </div>
         </td>
+        <td class="last-active-cell" title="${lastActiveTitle}">${lastActive}</td>
         <td>${date}</td>
       </tr>`;
     })
@@ -172,6 +228,19 @@ function renderUsageSummary() {
 
 userSearch.addEventListener("input", () => {
   renderUsers(userSearch.value);
+});
+
+document.querySelectorAll(".users-table th.sortable").forEach((th) => {
+  th.addEventListener("click", () => {
+    const col = th.dataset.sort;
+    if (sortColumn === col) {
+      sortDirection = sortDirection === "asc" ? "desc" : "asc";
+    } else {
+      sortColumn = col;
+      sortDirection = col === "credits" || col === "tokens" || col === "last_active" || col === "created" ? "desc" : "asc";
+    }
+    renderUsers(userSearch.value);
+  });
 });
 
 // Credit editor
@@ -915,6 +984,23 @@ function formatLocal(utcStr) {
   const mi = String(d.getMinutes()).padStart(2, "0");
   const ss = String(d.getSeconds()).padStart(2, "0");
   return `${yy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+function formatRelative(utcStr) {
+  const d = new Date(utcStr + (utcStr.endsWith("Z") ? "" : "Z"));
+  const now = new Date();
+  const diff = now - d;
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return "방금 전";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  const days = Math.floor(hr / 24);
+  if (days < 30) return `${days}일 전`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}개월 전`;
+  return `${Math.floor(months / 12)}년 전`;
 }
 
 function escapeHtml(str) {

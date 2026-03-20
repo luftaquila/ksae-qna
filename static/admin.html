@@ -50,11 +50,12 @@
         <table class="users-table">
           <thead>
             <tr>
-              <th>사용자</th>
-              <th>이메일</th>
-              <th>크레딧</th>
-              <th>API 토큰</th>
-              <th>가입일</th>
+              <th class="sortable" data-sort="name">사용자 <span class="sort-icon"></span></th>
+              <th class="sortable" data-sort="email">이메일 <span class="sort-icon"></span></th>
+              <th class="sortable" data-sort="credits">크레딧 <span class="sort-icon"></span></th>
+              <th class="sortable" data-sort="tokens">API 토큰 <span class="sort-icon"></span></th>
+              <th class="sortable" data-sort="last_active">최근 사용 <span class="sort-icon"></span></th>
+              <th class="sortable" data-sort="created">가입일 <span class="sort-icon"></span></th>
             </tr>
           </thead>
           <tbody id="users-tbody"></tbody>

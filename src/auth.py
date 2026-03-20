@@ -568,7 +568,8 @@ def list_all_users() -> list[dict]:
                u.created_at, u.updated_at,
                COALESCE(SUM(m.input_tokens), 0) AS total_input_tokens,
                COALESCE(SUM(m.output_tokens), 0) AS total_output_tokens,
-               COALESCE(SUM(m.thinking_tokens), 0) AS total_thinking_tokens
+               COALESCE(SUM(m.thinking_tokens), 0) AS total_thinking_tokens,
+               MAX(m.created_at) AS last_active_at
         FROM users u
         LEFT JOIN sessions s ON s.user_id = u.id
         LEFT JOIN messages m ON m.session_id = s.id AND m.role = 'assistant'
