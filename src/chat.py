@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import anthropic
+import numpy as np
 
 logger = logging.getLogger(__name__)
 from google import genai
@@ -82,7 +83,7 @@ MODEL_CONFIG = {
 
 SYSTEM_PROMPT = """\
 당신은 KSAE(한국자동차공학회) 대학생 자작자동차대회 전문 어시스턴트 PitBot입니다.
-사용자의 질문에 대해, 함께 제공되는 검색 결과 문서를 근거로 정확하게 답변합니다.
+사용자의 질문에 대해 정확하고 유용한 답변을 제공합니다.
 답변은 한국어로 작성합니다.
 
 # 데이터 소스
@@ -93,10 +94,11 @@ SYSTEM_PROMPT = """\
 규정집과 Q&A의 내용이 상충하는 경우, Q&A가 규정에 대한 공식 해석이므로 Q&A의 내용을 우선합니다.
 
 # 답변 규칙
-- 반드시 제공된 검색 결과에 근거하여 답변하세요. 검색 결과에 없는 내용을 추측하거나 지어내지 마세요.
+- 검색 결과에 관련 정보가 있으면 반드시 이를 근거로 활용하여 답변하세요. 특히 규정집 검색 결과는 사용자의 질문과 조금이라도 관련이 있다면 적극적으로 인용하세요.
 - 답변에서 근거가 되는 문서를 인용하세요. 예: "규정집 제3장 3.2절에 따르면...", "Q&A 게시판의 [제목]에서..."
 - URL이 있는 문서는 링크를 포함하세요.
-- 검색 결과에 관련 정보가 충분하지 않으면 솔직히 알려주세요.
+- 검색 결과에 직접적인 답이 없더라도, 자동차 공학이나 대회 준비에 관한 일반적인 질문이면 당신의 지식을 바탕으로 유용한 답변을 제공하세요. 이 경우 "검색 결과에는 직접적인 관련 정보가 없지만"이라는 전제를 붙이세요.
+- 검색 결과에도 없고 일반 지식으로도 답변하기 어려운 경우에만 솔직히 알려주세요.
 - 규정 관련 답변에는 "정확한 내용은 최신 규정집을 반드시 확인하세요"라는 안내를 포함하세요.
 - Q&A 게시판 내용을 근거로 답변하는 경우 "Q&A 답변 내용은 현행 규정과 다를 수 있으니 유의하세요"라는 안내를 포함하세요.
 - 기술적 질문에는 구체적이고 실용적인 답변을 제공하세요.
@@ -266,6 +268,7 @@ def _search_collection(
                 ],
                 query=models.FusionQuery(fusion=models.Fusion.RRF),
                 limit=limit,
+                with_vectors=True,
             )
         else:
             results = _qdrant.query_points(
@@ -292,12 +295,29 @@ def _search_collection(
             logger.error("Qdrant query failed for '%s': %s", col_name, e)
             return []
 
-    # RRF scores use a different scale than cosine similarity;
-    # skip min_score for hybrid results (quality is ensured by dense prefetches)
+    # For hybrid (RRF) results, compute actual cosine similarity from returned vectors.
+    # RRF scores are rank-based (not similarity-based) and misleading for thresholds/display.
     is_hybrid = query_text is not None
+    use_cosine = False
+    if is_hybrid and results.points:
+        if getattr(results.points[0], 'vector', None) is not None:
+            use_cosine = True
+            q_vec = np.asarray(vector, dtype=np.float32)
+            q_norm = float(np.linalg.norm(q_vec))
+
     hits = []
     for hit in results.points:
-        if not is_hybrid and hit.score < min_score:
+        if use_cosine and hit.vector is not None:
+            d_vec = np.asarray(hit.vector, dtype=np.float32)
+            d_norm = float(np.linalg.norm(d_vec))
+            score = float(np.dot(q_vec, d_vec) / (q_norm * d_norm)) if q_norm > 0 and d_norm > 0 else 0.0
+        else:
+            score = hit.score
+
+        # Skip min_score for raw RRF scores (different scale); apply for cosine/dense scores
+        if is_hybrid and not use_cosine:
+            pass
+        elif score < min_score:
             continue
 
         payload = hit.payload or {}
@@ -314,7 +334,7 @@ def _search_collection(
             url = ""
 
         hit_item = {
-            "score": hit.score,
+            "score": score,
             "source": source,
             "url": url,
             "content": content,
@@ -413,23 +433,18 @@ def search(
 
 def _build_prompt(query: str, sources: list[dict], search_query: str | None = None) -> str:
     """Build the user prompt with search context."""
-    context_parts = []
-    for i, s in enumerate(sources, 1):
-        header = f"[문서 {i}] {s['source']} (유사도: {s['score']:.4f})"
-        if s["url"]:
-            header += f"\nURL: {s['url']}"
-        context_parts.append(f"{header}\n{s['content']}")
-
-    context = "\n\n---\n\n".join(context_parts)
-    prompt = f"다음은 검색된 참고 문서입니다:\n\n{context}\n\n---\n\n"
-
-    # Warn LLM when search results are weak
     if sources:
-        max_score = max(s["score"] for s in sources)
-        if max_score < 0.6:
-            prompt += "⚠️ 검색 결과의 유사도가 전반적으로 낮습니다. 검색 결과가 질문과 직접적으로 관련이 없을 수 있으니, 관련 정보가 부족하다면 솔직히 알려주세요.\n"
+        context_parts = []
+        for i, s in enumerate(sources, 1):
+            header = f"[문서 {i}] {s['source']}"
+            if s["url"]:
+                header += f"\nURL: {s['url']}"
+            context_parts.append(f"{header}\n{s['content']}")
+
+        context = "\n\n---\n\n".join(context_parts)
+        prompt = f"다음은 검색된 참고 문서입니다:\n\n{context}\n\n---\n\n"
     else:
-        prompt += "⚠️ 검색 결과가 없습니다. 관련 정보를 찾지 못했다고 안내해주세요.\n"
+        prompt = "검색된 참고 문서가 없습니다. 일반 지식으로 답변 가능하면 답변해주세요.\n\n"
 
     if search_query and search_query != query:
         prompt += f"(검색에 사용된 쿼리: {search_query})\n"
@@ -710,7 +725,7 @@ JSON 배열로만 응답하세요: [{{"index": 0, "score": 8}}, ...]
         reranked = []
         for i, s in enumerate(sources):
             relevance = score_map.get(i, 5)
-            if relevance >= 5:
+            if relevance >= 3:
                 s["_relevance"] = relevance
                 reranked.append(s)
         reranked.sort(key=lambda x: x.get("_relevance", 0), reverse=True)
