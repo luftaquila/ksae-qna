@@ -10,6 +10,7 @@ import os
 import re
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import anthropic
@@ -34,10 +35,38 @@ _model_credits: dict[str, int | None] = {}
 _model_order: dict[str, int] = {}  # model_key -> display_order
 
 EMBEDDING_MODEL = "BAAI/bge-m3"
-COLLECTIONS = {
-    "qna": "ksae-qna",
-    "rules": "ksae-formula-rules",
+# 검색 소스 레지스트리 — 컬렉션을 추가할 때 고쳐야 하는 유일한 곳.
+# 프론트엔드 칩과 안내문은 /api/collections 로 이 값을 받아 렌더한다.
+# 순서가 곧 UI 칩 순서다.
+COLLECTION_REGISTRY: dict[str, dict] = {
+    "rules": {
+        "collection": "ksae-formula-rules",
+        "label": "규정",
+        "description": "대회 규정집 (2026 Formula)",
+        "authority": "공식",
+    },
+    "qna": {
+        "collection": "ksae-qna",
+        "label": "Q&A",
+        "description": "KSAE Q&A 게시판 — 운영진 질의응답",
+        "authority": "공식 해석",
+        "filter": "category",
+    },
+    "kb": {
+        "collection": "ksae-aark-kb",
+        "label": "AARK",
+        "description": "참가팀 익명 단톡방 지식베이스 (2025-02 ~ 2026-08)",
+        "authority": "경험담",
+        "filter": "confidence",
+    },
 }
+
+COLLECTIONS = {key: meta["collection"] for key, meta in COLLECTION_REGISTRY.items()}
+CONFIDENCE_LEVELS = ("합의됨", "다수의견", "단일제보", "미해결")
+
+# 같은 소주제(section)에서 올라오는 청크 상한. AARK는 항목 하나가 곧 post_id라
+# MAX_CHUNKS_PER_POST 가 사실상 동작하지 않아 별도 상한이 필요하다.
+MAX_CHUNKS_PER_SECTION = 2
 _STREAM_DONE = object()
 
 # Search cache: key -> (timestamp, results)
@@ -87,11 +116,15 @@ SYSTEM_PROMPT = """\
 답변은 한국어로 작성합니다.
 
 # 데이터 소스
-검색 결과는 두 종류의 소스에서 올 수 있습니다:
+검색 결과는 세 종류의 소스에서 올 수 있습니다:
 - **규정집**: "[문서 N] 제X장 ... > ..." 형태. 대회 공식 규정이므로 가장 신뢰도가 높습니다.
 - **Q&A 게시판**: "[문서 N] [카테고리] 제목" 형태. 대회 운영진의 질의응답 기록입니다.
+- **AARK 지식베이스**: "[문서 N] [AARK·신뢰도] 분야 > 소주제 > 항목" 형태.
+  참가팀 익명 단톡방에서 추린 현장 경험담이며 **공식 근거가 아닙니다.**
+  머리말의 신뢰도가 합의됨 > 다수의견 > 단일제보 > 미해결 순으로 확실성을 나타냅니다.
 
-규정집과 Q&A의 내용이 상충하는 경우, Q&A가 규정에 대한 공식 해석이므로 Q&A의 내용을 우선합니다.
+세 소스가 상충하면 **규정집 > Q&A > AARK** 순으로 우선합니다.
+단, 규정 해석에 한해서는 Q&A가 공식 해석이므로 규정집보다 우선합니다.
 
 # 답변 규칙
 - 검색 결과에 관련 정보가 있으면 반드시 이를 근거로 활용하여 답변하세요. 특히 규정집 검색 결과는 사용자의 질문과 조금이라도 관련이 있다면 적극적으로 인용하세요.
@@ -101,6 +134,8 @@ SYSTEM_PROMPT = """\
 - 검색 결과에도 없고 일반 지식으로도 답변하기 어려운 경우에만 솔직히 알려주세요.
 - 규정 관련 답변에는 "정확한 내용은 최신 규정집을 반드시 확인하세요"라는 안내를 포함하세요.
 - Q&A 게시판 내용을 근거로 답변하는 경우 "Q&A 답변 내용은 현행 규정과 다를 수 있으니 유의하세요"라는 안내를 포함하세요.
+- AARK 지식베이스를 근거로 답변하는 경우 출처의 신뢰도를 함께 밝히세요. 예: "다수의견 기준으로는...", "단일 팀 제보이므로 검증이 필요합니다".
+  신뢰도가 "미해결"인 내용은 결론이 아니라 미결 쟁점으로 소개하세요. 검차·규정 판단의 근거로는 제시하지 마세요.
 - 기술적 질문에는 구체적이고 실용적인 답변을 제공하세요.
 - 답변은 마크다운으로 구조화하여 가독성을 높이세요.
 - 자기소개나 인삿말 등을 하지 말고 바로 본론으로 들어가세요.\
@@ -242,6 +277,30 @@ def get_all_models_admin() -> list[dict]:
     return result
 
 
+def _search_sparse_collection(
+    vector: list[float],
+    col_name: str,
+    limit: int,
+    qf: models.Filter | None,
+    sparse: models.SparseVector,
+) -> Any:
+    """Query a v2 collection that carries named dense + BGE-M3 sparse vectors.
+
+    The sparse arm gives exact lexical weight to rare tokens (part numbers,
+    model codes) that a dense vector alone smooths away; RRF fuses the two.
+    """
+    return _qdrant.query_points(
+        collection_name=col_name,
+        prefetch=[
+            models.Prefetch(query=vector, using="dense", limit=limit * 2, filter=qf),
+            models.Prefetch(query=sparse, using="sparse", limit=limit * 2, filter=qf),
+        ],
+        query=models.FusionQuery(fusion=models.Fusion.RRF),
+        limit=limit,
+        with_vectors=["dense"],
+    )
+
+
 def _search_collection(
     vector: list[float],
     col_name: str,
@@ -249,10 +308,13 @@ def _search_collection(
     min_score: float,
     qf: models.Filter | None,
     query_text: str | None = None,
+    sparse: models.SparseVector | None = None,
 ) -> list[dict]:
     """Search a single Qdrant collection and return formatted hits."""
     try:
-        if query_text is not None:
+        if sparse is not None:
+            results = _search_sparse_collection(vector, col_name, limit, qf, sparse)
+        elif query_text is not None:
             # Hybrid search: dense + dense-with-text-filter, fused with RRF
             text_conditions = [
                 models.FieldCondition(key="content", match=models.MatchText(text=query_text))
@@ -278,6 +340,9 @@ def _search_collection(
                 query_filter=qf,
             )
     except Exception as e:
+        if sparse is not None:
+            logger.error("Sparse hybrid search failed for '%s': %s", col_name, e)
+            return []
         if query_text is not None:
             # Fallback to dense-only search if hybrid fails (e.g., no text index)
             logger.warning("Hybrid search failed for '%s', falling back to dense: %s", col_name, e)
@@ -297,18 +362,24 @@ def _search_collection(
 
     # For hybrid (RRF) results, compute actual cosine similarity from returned vectors.
     # RRF scores are rank-based (not similarity-based) and misleading for thresholds/display.
-    is_hybrid = query_text is not None
+    is_hybrid = query_text is not None or sparse is not None
     use_cosine = False
     if is_hybrid and results.points:
-        if getattr(results.points[0], 'vector', None) is not None:
+        _v0 = getattr(results.points[0], 'vector', None)
+        if isinstance(_v0, dict):
+            _v0 = _v0.get('dense')
+        if _v0 is not None:
             use_cosine = True
             q_vec = np.asarray(vector, dtype=np.float32)
             q_norm = float(np.linalg.norm(q_vec))
 
     hits = []
     for hit in results.points:
-        if use_cosine and hit.vector is not None:
-            d_vec = np.asarray(hit.vector, dtype=np.float32)
+        hit_vec = hit.vector
+        if isinstance(hit_vec, dict):          # v2 컬렉션은 named vector
+            hit_vec = hit_vec.get("dense")
+        if use_cosine and hit_vec is not None:
+            d_vec = np.asarray(hit_vec, dtype=np.float32)
             d_norm = float(np.linalg.norm(d_vec))
             score = float(np.dot(q_vec, d_vec) / (q_norm * d_norm)) if q_norm > 0 and d_norm > 0 else 0.0
         else:
@@ -323,8 +394,21 @@ def _search_collection(
         payload = hit.payload or {}
         content = payload.get("content", "") or payload.get("chunk_text", "")
 
-        if "title" in payload:
-            source = f"[{payload.get('category', '')}] {payload['title']}"
+        if payload.get("source_type") == "aark":
+            # Anonymous community knowledge base: no URL, confidence-graded.
+            # Checked before "chapter" since this payload also carries one.
+            label = "AARK"
+            if payload.get("confidence"):
+                label += f"·{payload['confidence']}"
+            path = [f"{payload.get('chapter_num', '')}. {payload.get('chapter', '')}".strip(". ")]
+            for key in ("section", "topic"):
+                if payload.get(key):
+                    path.append(payload[key])
+            source = f"[{label}] " + " > ".join(p for p in path if p)
+            url = ""
+        elif "title" in payload:
+            category = payload.get("category") or ""
+            source = f"[{category}] {payload['title']}" if category else payload["title"]
             url = payload.get("url", "")
         elif "chapter" in payload:
             source = f"제{payload.get('chapter_num', '')}장 {payload.get('chapter', '')} > {payload.get('section', '')}"
@@ -341,6 +425,14 @@ def _search_collection(
         }
         if "id" in payload:
             hit_item["post_id"] = payload["id"]
+        # 익명 채팅 출처는 URL이 없다. 발언 날짜와 신뢰도가 유일한 검증 단서이므로
+        # 클라이언트까지 내려보내 출처 항목에 표시한다.
+        if payload.get("confidence"):
+            hit_item["confidence"] = payload["confidence"]
+        if payload.get("dates"):
+            hit_item["dates"] = payload["dates"]
+        if payload.get("section"):
+            hit_item["section"] = payload["section"]
         hits.append(hit_item)
 
     hits.sort(key=lambda x: x["score"], reverse=True)
@@ -349,19 +441,25 @@ def _search_collection(
 
 def search(
     query: str,
-    limit: int = 5,
+    limit: int = 7,
     min_score: float = 0.0,
     collections: list[str] | None = None,
     category: str | None = None,
+    confidence: list[str] | None = None,
     min_per_collection: int = 1,
 ) -> list[dict]:
     """Encode query with BGE-M3 and search Qdrant for similar chunks.
 
-    *collections* is a list of short keys (``"qna"``, ``"rules"``).
+    *collections* is a list of short keys (``"qna"``, ``"rules"``, ``"kb"``).
     When ``None`` or empty, all collections are searched.
     *category* filters qna results by category (e.g. ``"Formula"``, ``"Baja"``, ``"EV"``).
+    *confidence* filters kb results by confidence level (``"합의됨"`` …).
     *min_per_collection* guarantees at least N results from each collection
     (if available), preventing one collection from dominating all results.
+
+    The default *limit* is 7 rather than 5 because one slot per collection is
+    reserved by *min_per_collection*; with three collections a limit of 5 would
+    leave only two slots to be filled by score.
     """
     if not collections:
         collections = list(COLLECTIONS.keys())
@@ -369,7 +467,8 @@ def search(
 
     # Check cache
     cache_key = hashlib.sha256(
-        f"{query}|{limit}|{min_score}|{','.join(sorted(collections))}|{category}".encode()
+        f"{query}|{limit}|{min_score}|{','.join(sorted(collections))}"
+        f"|{category}|{','.join(sorted(confidence or []))}".encode()
     ).hexdigest()
     now = time.monotonic()
     cached = _search_cache.get(cache_key)
@@ -378,19 +477,36 @@ def search(
 
     vector = _model.encode(query).tolist()
 
-    # Build category filter for qna collection
+    # Per-collection payload filters (qna: category, kb: confidence)
     category_filter = None
     if category:
         category_filter = models.Filter(
             must=[models.FieldCondition(key="category", match=models.MatchValue(value=category))]
         )
 
+    confidence_filter = None
+    levels = [c for c in (confidence or []) if c in CONFIDENCE_LEVELS]
+    if levels and len(levels) < len(CONFIDENCE_LEVELS):
+        # 표·단편 청크는 신뢰도가 비어 있다(항목이 아니라 정리표라 등급이 없다).
+        # OR 조건으로 남겨두지 않으면 필터를 켜는 순간 표가 통째로 사라진다.
+        confidence_filter = models.Filter(
+            should=[
+                models.FieldCondition(key="confidence", match=models.MatchAny(any=levels)),
+                models.FieldCondition(key="confidence", match=models.MatchValue(value="")),
+            ]
+        )
+
+    collection_filters = {
+        COLLECTIONS.get("qna"): category_filter,
+        COLLECTIONS.get("kb"): confidence_filter,
+    }
+
     # Parallel search across collections
     per_collection: dict[str, list[dict]] = {}
     with ThreadPoolExecutor(max_workers=len(collection_names)) as executor:
         futures = {}
         for col_name in collection_names:
-            qf = category_filter if (category and col_name == COLLECTIONS.get("qna")) else None
+            qf = collection_filters.get(col_name)
             future = executor.submit(_search_collection, vector, col_name, limit, min_score, qf, query)
             futures[future] = col_name
 
@@ -410,8 +526,11 @@ def search(
     output = guaranteed + remainder[:remaining_slots]
     output.sort(key=lambda x: x["score"], reverse=True)
 
-    # Deduplicate: allow up to MAX_CHUNKS_PER_POST per post
-    seen_posts: dict[int, int] = {}
+    # Deduplicate: up to MAX_CHUNKS_PER_POST per post, and — for sources where a
+    # post is a single small item (kb) — up to MAX_CHUNKS_PER_SECTION per section,
+    # so one subsection cannot fill every slot with near-identical topics.
+    seen_posts: dict[object, int] = {}
+    seen_sections: dict[str, int] = {}
     deduped: list[dict] = []
     for item in output:
         pid = item.get("post_id")
@@ -420,6 +539,12 @@ def search(
             if count >= MAX_CHUNKS_PER_POST:
                 continue
             seen_posts[pid] = count + 1
+        section = item.get("section")
+        if section:
+            scount = seen_sections.get(section, 0)
+            if scount >= MAX_CHUNKS_PER_SECTION:
+                continue
+            seen_sections[section] = scount + 1
         deduped.append(item)
 
     # Update cache (evict oldest if full)
@@ -739,11 +864,12 @@ JSON 배열로만 응답하세요: [{{"index": 0, "score": 8}}, ...]
 
 async def search_and_stream(
     query: str,
-    limit: int = 5,
+    limit: int = 7,
     min_score: float = 0.0,
     history: list[dict] | None = None,
     collections: list[str] | None = None,
     category: str | None = None,
+    confidence: list[str] | None = None,
     model: str = "gemini-3-flash",
 ) -> AsyncIterator[str]:
     """
@@ -772,7 +898,7 @@ async def search_and_stream(
         category = _detect_category(search_query) or _detect_category(query)
 
     # Step 2: Search with (possibly rewritten) query
-    sources = search(search_query, limit, min_score, collections, category)
+    sources = search(search_query, limit, min_score, collections, category, confidence)
 
     # Re-rank results for relevance
     sources = await _rerank_results(search_query, sources)

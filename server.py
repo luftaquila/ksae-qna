@@ -55,7 +55,7 @@ from src.auth import (
     set_site_setting,
     update_session_title,
 )
-from src.chat import MODEL_CONFIG, get_all_models_admin, get_effective_credits, get_models, init_model_settings, init_resources, is_model_available, search_and_stream, set_model_admin_settings, set_model_display_order
+from src.chat import COLLECTION_REGISTRY, CONFIDENCE_LEVELS, MODEL_CONFIG, get_all_models_admin, get_effective_credits, get_models, init_model_settings, init_resources, is_model_available, search_and_stream, set_model_admin_settings, set_model_display_order
 
 load_dotenv()
 
@@ -115,10 +115,11 @@ _background_tasks: set[asyncio.Task] = set()
 
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
-    limit: int = Field(default=5, ge=1, le=20)
+    limit: int = Field(default=7, ge=1, le=20)
     session_id: int | None = None
     collections: list[str] | None = None
     category: str | None = None
+    confidence: list[str] | None = None
     model: str = "gemini-3-flash"
 
 
@@ -302,6 +303,18 @@ async def models_list():
     return {"models": get_models()}
 
 
+@app.get("/api/collections")
+async def collections_list():
+    """검색 소스 목록. 프론트엔드 칩·안내문은 이 응답으로 렌더된다."""
+    return {
+        "collections": [
+            {"key": key, **{k: v for k, v in meta.items() if k != "collection"}}
+            for key, meta in COLLECTION_REGISTRY.items()
+        ],
+        "confidence_levels": list(CONFIDENCE_LEVELS),
+    }
+
+
 @app.post("/api/chat")
 async def chat(request: Request, req: ChatRequest):
     user = get_current_user(request)
@@ -320,7 +333,7 @@ async def chat(request: Request, req: ChatRequest):
     model_label = model_config["label"]
 
     if not deduct_credit(user["id"], credits_needed, f"질문 ({model_label})"):
-        return JSONResponse({"error": "크레딧이 부족합니다"}, status_code=402)
+        return JSONResponse({"error": "이용권이 부족합니다"}, status_code=402)
 
     updated_user = get_user_by_id(user["id"])
     remaining = updated_user["credits"] if updated_user else 0
@@ -366,7 +379,7 @@ async def chat(request: Request, req: ChatRequest):
         rewritten_query = None
 
         try:
-            async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections, category=req.category, model=req.model):
+            async for event in search_and_stream(req.query, req.limit, min_score=0.5, history=history, collections=req.collections, category=req.category, confidence=req.confidence, model=req.model):
                 # Forward error events as token events so the client displays them
                 if event.startswith("event: error"):
                     has_error = True
