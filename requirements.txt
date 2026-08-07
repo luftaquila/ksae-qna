@@ -2,6 +2,7 @@ requests
 beautifulsoup4
 lxml
 sentence-transformers
+transformers          # src/chunker.py 가 직접 import 한다
 numpy
 qdrant-client
 tqdm
@@ -15,3 +16,4 @@ httpx
 PyJWT
 itsdangerous
 anthropic
+pytest                # tests/

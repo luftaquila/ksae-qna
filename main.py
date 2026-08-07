@@ -180,5 +180,89 @@ def upload(ctx: click.Context, recreate: bool) -> None:
     _run_stage("upload", upload_to_qdrant, qdrant_url=qdrant_url, api_key=qdrant_api_key, collection_name=collection, recreate=recreate)
 
 
+# ---------------------------------------------------------------------------
+# AARK knowledge base — a single curated Markdown document, not a crawl.
+# Shares the embed/upload stages with the Q&A pipeline but uses its own
+# chunker, data paths and collection.
+# ---------------------------------------------------------------------------
+
+KB_SOURCE = "data/raw/aark-kb.md"
+KB_CHUNKS = "data/processed/kb_chunks.json"
+KB_EMBEDDINGS = "data/processed/kb_embeddings.npy"
+KB_COLLECTION = "ksae-aark-kb"
+KB_PAYLOAD_FIELDS = ("source_type", "source_version", "chapter_num", "chapter",
+                     "section", "topic", "confidence", "dates", "kind")
+KB_INDEX_FIELDS = ("chapter", "confidence", "kind")
+
+
+def _kb_upload(ctx: click.Context, collection: str, recreate: bool) -> None:
+    """Run the KB upload stage with the knowledge base payload schema."""
+    from src.uploader import upload_to_qdrant
+
+    _run_stage(
+        "kb-upload", upload_to_qdrant,
+        chunks_path=KB_CHUNKS,
+        embeddings_path=KB_EMBEDDINGS,
+        qdrant_url=ctx.obj["qdrant_url"],
+        api_key=ctx.obj["qdrant_api_key"],
+        collection_name=collection,
+        recreate=recreate,
+        payload_fields=KB_PAYLOAD_FIELDS,
+        index_fields=KB_INDEX_FIELDS,
+        prune=True,
+    )
+
+
+@cli.command()
+@click.option("--source", default=KB_SOURCE, help="Knowledge base Markdown path.")
+@click.option("--kb-collection", default=KB_COLLECTION, help="Qdrant collection for the knowledge base.")
+@click.option("--recreate", is_flag=True, default=False, help="Delete and recreate the collection before uploading.")
+@click.pass_context
+def kb(ctx: click.Context, source: str, kb_collection: str, recreate: bool) -> None:
+    """Run the knowledge base pipeline (chunk -> embed -> upload)."""
+    from src.embedder import embed_chunks
+    from src.kb_chunker import chunk_kb
+
+    total_start = time.time()
+    click.echo(f"Running KB pipeline: chunk -> embed -> upload ({source} -> {kb_collection})")
+
+    _run_stage("kb-chunk", chunk_kb, input_path=source, output_path=KB_CHUNKS)
+    _run_stage("kb-embed", embed_chunks, input_path=KB_CHUNKS, output_path=KB_EMBEDDINGS,
+               batch_size=ctx.obj["batch_size"], embed_url=ctx.obj["embed_url"])
+    _kb_upload(ctx, kb_collection, recreate)
+
+    elapsed = time.time() - total_start
+    click.echo(f"KB pipeline completed in {elapsed:.1f}s")
+
+
+@cli.command("kb-chunk")
+@click.option("--source", default=KB_SOURCE, help="Knowledge base Markdown path.")
+@click.pass_context
+def kb_chunk(ctx: click.Context, source: str) -> None:
+    """Run the knowledge base chunk stage."""
+    from src.kb_chunker import chunk_kb
+
+    _run_stage("kb-chunk", chunk_kb, input_path=source, output_path=KB_CHUNKS)
+
+
+@cli.command("kb-embed")
+@click.pass_context
+def kb_embed(ctx: click.Context) -> None:
+    """Run the knowledge base embed stage."""
+    from src.embedder import embed_chunks
+
+    _run_stage("kb-embed", embed_chunks, input_path=KB_CHUNKS, output_path=KB_EMBEDDINGS,
+               batch_size=ctx.obj["batch_size"], embed_url=ctx.obj["embed_url"])
+
+
+@cli.command("kb-upload")
+@click.option("--kb-collection", default=KB_COLLECTION, help="Qdrant collection for the knowledge base.")
+@click.option("--recreate", is_flag=True, default=False, help="Delete and recreate the collection before uploading.")
+@click.pass_context
+def kb_upload(ctx: click.Context, kb_collection: str, recreate: bool) -> None:
+    """Run the knowledge base upload stage."""
+    _kb_upload(ctx, kb_collection, recreate)
+
+
 if __name__ == "__main__":
     cli()
