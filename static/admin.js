@@ -159,7 +159,7 @@ function renderUsers(filter = "") {
         <td>
           <div class="credit-cell" id="credit-cell-${u.id}">
             <div class="token-wrapper">
-              <span class="credit-badge${lowClass}" onclick="toggleAdminPopover(${u.id})">${u.credits} 크레딧</span>
+              <span class="credit-badge${lowClass}" onclick="toggleAdminPopover(${u.id})">${u.credits} 이용권</span>
             </div>
             <button class="credit-adjust-btn" onclick="showCreditEditor(${u.id}, ${u.credits})">조정</button>
           </div>
@@ -298,7 +298,7 @@ window.cancelCreditEdit = function (userId, currentCredits) {
   const lowClass = currentCredits <= lowCreditThreshold ? " low" : "";
   cell.innerHTML = `
     <div class="token-wrapper">
-      <span class="credit-badge${lowClass}" onclick="toggleAdminPopover(${userId})">${currentCredits} 크레딧</span>
+      <span class="credit-badge${lowClass}" onclick="toggleAdminPopover(${userId})">${currentCredits} 이용권</span>
     </div>
     <button class="credit-adjust-btn" onclick="showCreditEditor(${userId}, ${currentCredits})">조정</button>
   `;
@@ -322,7 +322,7 @@ window.toggleAdminPopover = function (userId) {
   adminPopover = document.createElement("div");
   adminPopover.className = "token-popover";
   adminPopover.innerHTML = `
-    <div class="token-popover-header">크레딧 사용 내역</div>
+    <div class="token-popover-header">이용권 사용 내역</div>
     <div class="token-history"><div class="token-history-loading">불러오는 중...</div></div>
   `;
   wrapper.appendChild(adminPopover);
@@ -665,7 +665,7 @@ function renderModels() {
           ${providerStatus}
         </div>
         <div class="model-card-credits-row">
-          <label class="model-credits-label">차감 크레딧</label>
+          <label class="model-credits-label">차감 이용권</label>
           <input type="number" class="model-credits-input" min="0" value="${m.credits}"
             data-model="${m.id}" onchange="updateModelCredits('${m.id}', this.value)">
           ${resetBtn}
@@ -923,7 +923,7 @@ document.getElementById("bulk-credit-btn").addEventListener("click", async () =>
   const input = document.getElementById("bulk-credit-value");
   const credits = parseInt(input.value, 10);
   if (isNaN(credits) || credits < 0) return;
-  if (!confirm(`모든 사용자의 크레딧을 ${credits}(으)로 일괄 변경합니다. 계속하시겠습니까?`)) return;
+  if (!confirm(`모든 사용자의 이용권을 ${credits}(으)로 일괄 변경합니다. 계속하시겠습니까?`)) return;
   try {
     const res = await fetch("/api/admin/credits/bulk", {
       method: "POST",
@@ -932,7 +932,7 @@ document.getElementById("bulk-credit-btn").addEventListener("click", async () =>
     });
     if (res.ok) {
       const data = await res.json();
-      alert(`${data.affected}명의 크레딧이 변경되었습니다.`);
+      alert(`${data.affected}명의 이용권이 변경되었습니다.`);
       loadUsers();
     } else {
       const err = await res.json();

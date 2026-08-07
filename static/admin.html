@@ -52,7 +52,7 @@
             <tr>
               <th class="sortable" data-sort="name">사용자 <span class="sort-icon"></span></th>
               <th class="sortable" data-sort="email">이메일 <span class="sort-icon"></span></th>
-              <th class="sortable" data-sort="credits">크레딧 <span class="sort-icon"></span></th>
+              <th class="sortable" data-sort="credits">이용권 <span class="sort-icon"></span></th>
               <th class="sortable" data-sort="tokens">API 토큰 <span class="sort-icon"></span></th>
               <th class="sortable" data-sort="last_active">최근 사용 <span class="sort-icon"></span></th>
               <th class="sortable" data-sort="created">가입일 <span class="sort-icon"></span></th>
@@ -73,7 +73,7 @@
         <p class="settings-description">사이트 전역 설정을 관리합니다.</p>
         <div class="settings-form">
           <div class="settings-row">
-            <label class="settings-label">무제한 크레딧 모드</label>
+            <label class="settings-label">무제한 이용권 모드</label>
             <div class="settings-toggle-row">
               <label class="toggle-switch">
                 <input type="checkbox" id="setting-unlimited-credits">
@@ -81,29 +81,29 @@
               </label>
               <span class="toggle-label" id="unlimited-label">비활성</span>
             </div>
-            <p class="settings-hint">활성화하면 모든 사용자의 크레딧이 무제한이 됩니다 (차감 없음)</p>
+            <p class="settings-hint">활성화하면 모든 사용자의 이용권이 무제한이 됩니다 (차감 없음)</p>
           </div>
           <div class="settings-row">
-            <label class="settings-label" for="setting-default-credits">신규 가입 기본 제공 크레딧</label>
+            <label class="settings-label" for="setting-default-credits">신규 가입 기본 제공 이용권</label>
             <div class="settings-input-group">
               <input type="number" id="setting-default-credits" min="0" max="10000" value="15">
             </div>
-            <p class="settings-hint">새로 가입하는 사용자에게 자동으로 지급되는 크레딧 수</p>
+            <p class="settings-hint">새로 가입하는 사용자에게 자동으로 지급되는 이용권 수</p>
           </div>
           <div class="settings-row">
-            <label class="settings-label" for="setting-low-credit-threshold">크레딧 부족 경고 기준</label>
+            <label class="settings-label" for="setting-low-credit-threshold">이용권 부족 경고 기준</label>
             <div class="settings-input-group">
               <input type="number" id="setting-low-credit-threshold" min="0" max="10000" value="5">
             </div>
-            <p class="settings-hint">크레딧이 이 값 이하일 때 크레딧 칩이 빨간색으로 표시됩니다</p>
+            <p class="settings-hint">이용권이 이 값 이하일 때 이용권 칩이 빨간색으로 표시됩니다</p>
           </div>
           <div class="settings-row">
-            <label class="settings-label settings-section-title">전체 사용자 크레딧 일괄 변경</label>
+            <label class="settings-label settings-section-title">전체 사용자 이용권 일괄 변경</label>
             <div class="settings-input-group">
-              <input type="number" id="bulk-credit-value" min="0" max="10000" value="15" placeholder="크레딧">
+              <input type="number" id="bulk-credit-value" min="0" max="10000" value="15" placeholder="이용권">
               <button class="bulk-credit-btn" id="bulk-credit-btn">일괄 적용</button>
             </div>
-            <p class="settings-hint">모든 사용자의 크레딧을 입력한 값으로 일괄 변경합니다</p>
+            <p class="settings-hint">모든 사용자의 이용권을 입력한 값으로 일괄 변경합니다</p>
           </div>
         </div>
       </div>

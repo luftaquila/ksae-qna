@@ -66,7 +66,7 @@ function renderAuthUI() {
     const img = currentUser.is_admin
       ? `<a href="/admin" class="profile-admin-link" title="관리자 페이지">${imgTag}</a>`
       : imgTag;
-    const creditText = unlimitedCredits ? "∞ 크레딧" : `${currentUser.credits} 크레딧`;
+    const creditText = unlimitedCredits ? "∞ 이용권" : `${currentUser.credits} 이용권`;
     const lowClass = !unlimitedCredits && currentUser.credits <= lowCreditThreshold ? " low" : "";
 
     authArea.innerHTML = `
@@ -101,10 +101,10 @@ function updateCreditDisplay(credits) {
   const badge = document.getElementById("credit-badge");
   if (!badge) return;
   if (unlimitedCredits) {
-    badge.textContent = "∞ 크레딧";
+    badge.textContent = "∞ 이용권";
     badge.classList.remove("low");
   } else {
-    badge.textContent = `${credits} 크레딧`;
+    badge.textContent = `${credits} 이용권`;
     badge.classList.toggle("low", credits <= lowCreditThreshold);
   }
 }
@@ -135,7 +135,7 @@ function toggleTokenPopover() {
   tokenPopover.className = "token-popover";
   tokenPopover.innerHTML = `
     <div class="token-popover-header">
-      <span>크레딧 사용 내역</span>
+      <span>이용권 사용 내역</span>
     </div>
     <div class="token-history"><div class="token-history-loading">불러오는 중...</div></div>
     <div class="token-popover-footer">
@@ -204,7 +204,7 @@ async function loadTransactions() {
 }
 
 async function handleTokenPurchase() {
-  alert("크레딧 구매 기능은 준비 중입니다.");
+  alert("이용권 구매 기능은 준비 중입니다.");
 }
 
 // ---------------------------------------------------------------------------
@@ -345,9 +345,11 @@ form.addEventListener("submit", async (e) => {
 
   try {
     const collections = [...form.querySelectorAll('input[name="collections"]:checked')].map((el) => el.value);
-    const category = document.getElementById("category-select").value || null;
+    const categoryEl = document.getElementById("category-select");
+    const category = categoryEl && !categoryEl.disabled ? (categoryEl.value || null) : null;
+    const confidence = getSelectedConfidence();
     const model = document.getElementById("model-select").value;
-    const body = { query, collections, category, model };
+    const body = { query, collections, category, confidence, model };
     if (currentSessionId) body.session_id = currentSessionId;
 
     const res = await fetch("/api/chat", {
@@ -365,7 +367,7 @@ form.addEventListener("submit", async (e) => {
     }
 
     if (res.status === 402) {
-      answerEl.textContent = "크레딧이 부족합니다. 구매 후 다시 시도해주세요.";
+      answerEl.textContent = "이용권이 부족합니다. 구매 후 다시 시도해주세요.";
       updateCreditDisplay(0);
       setLoading(false);
       return;
@@ -486,6 +488,13 @@ function appendAssistantShell() {
   return el;
 }
 
+const CONF_CLASS = {
+  "합의됨": "conf-ok",
+  "다수의견": "conf-major",
+  "단일제보": "conf-single",
+  "미해결": "conf-open",
+};
+
 function renderSources(container, sources) {
   if (!sources.length) return;
 
@@ -499,10 +508,24 @@ function renderSources(container, sources) {
   sources.forEach((s) => {
     const item = document.createElement("div");
     item.className = "source-item";
-    let html = `<div class="source-header">${escapeHtml(s.source)}</div>`;
+
+    // 신뢰도는 이 데이터의 핵심 축이므로 문자열에 묻지 않고 배지로 뺀다.
+    const conf = s.confidence
+      ? `<span class="conf-badge ${CONF_CLASS[s.confidence] || ""}">${escapeHtml(s.confidence)}</span>`
+      : "";
+    const header = conf
+      ? escapeHtml(s.source).replace(/^\[[^\]]*·[^\]]*\]\s*/, "")
+      : escapeHtml(s.source);
+
+    let html = `<div class="source-header">${conf}${header}</div>`;
     html += `<span class="source-score">유사도: ${(s.score * 100).toFixed(1)}%</span>`;
     if (s.url) {
       html += ` <a href="${escapeAttr(s.url)}" target="_blank" rel="noopener">원문 보기</a>`;
+    } else if (s.dates && s.dates.length) {
+      // 익명 채팅 출처는 링크할 원문이 없다. 발언 날짜가 유일한 대조 단서다.
+      const shown = s.dates.slice(0, 3).join(", ");
+      const more = s.dates.length > 3 ? ` 외 ${s.dates.length - 3}건` : "";
+      html += ` <span class="source-dates">발언일: ${escapeHtml(shown)}${more}</span>`;
     }
     html += `<div class="source-content">${escapeHtml(s.content)}</div>`;
     item.innerHTML = html;
@@ -587,6 +610,103 @@ function renderModelSelect() {
 }
 
 // ---------------------------------------------------------------------------
+// Collections (검색 소스) — /api/collections 로 칩·필터를 렌더한다.
+// 소스를 추가할 때 이 파일을 고칠 필요가 없다.
+// ---------------------------------------------------------------------------
+let availableCollections = [];
+let confidenceLevels = [];
+
+const CATEGORY_OPTIONS = ["Formula", "Baja", "EV"];
+
+async function loadCollections() {
+  try {
+    const res = await fetch("/api/collections");
+    const data = await res.json();
+    availableCollections = data.collections || [];
+    confidenceLevels = data.confidence_levels || [];
+  } catch {
+    availableCollections = [];
+    confidenceLevels = [];
+  }
+  renderCollectionChips();
+}
+
+function renderCollectionChips() {
+  const host = document.getElementById("collection-chips");
+  if (!host) return;
+  host.innerHTML = "";
+
+  for (const c of availableCollections) {
+    const label = document.createElement("label");
+    label.className = "collection-chip";
+    label.title = `${c.description} (${c.authority})`;
+    label.innerHTML =
+      `<input type="checkbox" name="collections" value="${escapeAttr(c.key)}" checked>` +
+      `<span>${escapeHtml(c.label)}</span>`;
+    host.appendChild(label);
+
+    if (c.filter === "category") host.appendChild(buildCategorySelect());
+    if (c.filter === "confidence") host.appendChild(buildConfidenceSelect(c.key));
+
+    label.querySelector("input").addEventListener("change", syncFilterStates);
+  }
+  syncFilterStates();
+}
+
+function buildCategorySelect() {
+  const sel = document.createElement("select");
+  sel.id = "category-select";
+  sel.className = "category-select";
+  sel.title = "Q&A 카테고리 필터";
+  sel.innerHTML =
+    `<option value="">전체</option>` +
+    CATEGORY_OPTIONS.map((o) => `<option value="${o}">${o}</option>`).join("");
+  return sel;
+}
+
+function buildConfidenceSelect(key) {
+  // AARK는 경험담이라 확실성이 섞여 있다. 기본은 전체, 필요하면 좁힌다.
+  const sel = document.createElement("select");
+  sel.id = "confidence-select";
+  sel.className = "category-select";
+  sel.dataset.collection = key;
+  sel.title = "AARK 신뢰도 필터";
+  sel.innerHTML =
+    `<option value="">신뢰도 전체</option>` +
+    `<option value="합의됨,다수의견">합의됨·다수의견만</option>` +
+    confidenceLevels.map((l) => `<option value="${l}">${l}만</option>`).join("");
+  return sel;
+}
+
+function getSelectedConfidence() {
+  const sel = document.getElementById("confidence-select");
+  if (!sel || sel.disabled || !sel.value) return null;
+  return sel.value.split(",");
+}
+
+function syncFilterStates() {
+  for (const c of availableCollections) {
+    const box = document.querySelector(`input[name="collections"][value="${c.key}"]`);
+    const sel = c.filter === "category"
+      ? document.getElementById("category-select")
+      : c.filter === "confidence"
+        ? document.getElementById("confidence-select")
+        : null;
+    if (!box || !sel) continue;
+    sel.disabled = !box.checked;
+    if (!box.checked) sel.value = "";
+  }
+}
+
+function buildWelcomeSourceRows() {
+  const rows = availableCollections.map(
+    (c) => `<li><b>${escapeHtml(c.label)}</b> &mdash; ${escapeHtml(c.description)}` +
+           ` <span class="welcome-authority">${escapeHtml(c.authority)}</span></li>`
+  );
+  return rows.join("");
+}
+
+// ---------------------------------------------------------------------------
 // Welcome screen
 // ---------------------------------------------------------------------------
 function buildWelcomeModelRows() {
@@ -622,7 +742,7 @@ function showWelcome() {
         <p class="welcome-subtitle">자작자동차 규정 및 Q&A 챗봇</p>
       </div>
       <div class="welcome-models">
-        <div class="welcome-models-title">사용 가능 모델 (소모 크레딧)</div>
+        <div class="welcome-models-title">사용 가능 모델 (소모 이용권)</div>
         <div class="welcome-models-grid">
           ${buildWelcomeModelRows()}
         </div>
@@ -630,16 +750,12 @@ function showWelcome() {
       <div class="welcome-items">
         <div class="welcome-item">
           <span class="welcome-icon">&#9889;</span>
-          <span>질문 1회당 선택한 모델에 따라 크레딧이 차감됩니다</span>
+          <span>질문 1회당 선택한 모델에 따라 이용권이 차감됩니다</span>
         </div>
         <div class="welcome-item">
           <span class="welcome-icon">&#128218;</span>
           <span>입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.
-            <ul class="welcome-chip-list">
-              <li><b>규정</b> &mdash; 대회 규정집 (2026 Formula)</li>
-              <li><b>Q&A</b> &mdash; QnA 게시판 데이터</li>
-              <li><b>카테고리</b> &mdash; Q&A 카테고리 필터</li>
-            </ul>
+            <ul class="welcome-chip-list">${buildWelcomeSourceRows()}</ul>
           </span>
         </div>
       </div>
@@ -651,24 +767,10 @@ function showWelcome() {
 }
 
 // ---------------------------------------------------------------------------
-// QnA chip ↔ category select sync
-// ---------------------------------------------------------------------------
-const qnaCheckbox = document.querySelector('input[name="collections"][value="qna"]');
-const categorySelect = document.getElementById("category-select");
-
-function syncCategoryState() {
-  const enabled = qnaCheckbox.checked;
-  categorySelect.disabled = !enabled;
-  if (!enabled) categorySelect.value = "";
-}
-
-qnaCheckbox.addEventListener("change", syncCategoryState);
-
-// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 initTheme();
-loadModels().then(() => showWelcome());
+Promise.all([loadModels(), loadCollections()]).then(() => showWelcome());
 checkAuth();
 
 // Persist model selection on change (registered once)

@@ -53,22 +53,17 @@
         </div>
 
         <form id="form" class="input-area">
-          <div class="collection-selector">
-            <select id="model-select" class="model-select"></select>
-            <label class="collection-chip">
-              <input type="checkbox" name="collections" value="rules" checked>
-              <span>규정</span>
-            </label>
-            <label class="collection-chip">
-              <input type="checkbox" name="collections" value="qna" checked>
-              <span>Q&amp;A</span>
-            </label>
-            <select id="category-select" class="category-select">
-              <option value="">전체</option>
-              <option value="Formula">Formula</option>
-              <option value="Baja">Baja</option>
-              <option value="EV">EV</option>
-            </select>
+          <!-- 모델 선택과 검색 소스 선택은 성격이 다르므로 줄을 나눈다.
+               소스 칩·필터는 /api/collections 응답으로 렌더된다. -->
+          <div class="control-bar">
+            <div class="control-group model-group">
+              <span class="control-label">모델</span>
+              <select id="model-select" class="model-select"></select>
+            </div>
+            <div class="control-group source-group">
+              <span class="control-label">검색 소스</span>
+              <div id="collection-chips" class="collection-selector"></div>
+            </div>
           </div>
           <div class="input-row">
             <input

@@ -1055,3 +1055,80 @@ header h1 {
     display: block;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * 컨트롤 바 — 모델 선택과 검색 소스 선택은 성격이 다르므로 줄을 나눈다
+ * ------------------------------------------------------------------------- */
+.control-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.control-label {
+  flex: 0 0 auto;
+  min-width: 52px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+.control-group .model-select {
+  min-width: 190px;
+}
+
+@media (max-width: 640px) {
+  .control-label { min-width: 0; }
+  .control-bar { gap: 8px; }
+}
+
+/* ---------------------------------------------------------------------------
+ * 신뢰도 배지 — AARK 출처의 확실성 등급
+ * ------------------------------------------------------------------------- */
+.conf-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+.conf-badge.conf-ok     { background: #dafbe1; color: #1a7f37; }
+.conf-badge.conf-major  { background: #ddf4ff; color: #0550ae; }
+.conf-badge.conf-single { background: #eef1f4; color: #4c5561; }
+.conf-badge.conf-open   { background: #ffebe9; color: #cf222e; }
+
+[data-theme="dark"] .conf-badge.conf-ok     { background: #12321c; color: #6fdc8c; }
+[data-theme="dark"] .conf-badge.conf-major  { background: #10263d; color: #6cb6ff; }
+[data-theme="dark"] .conf-badge.conf-single { background: #23272d; color: #9aa4b0; }
+[data-theme="dark"] .conf-badge.conf-open   { background: #3a1618; color: #ff8f8a; }
+
+/* 익명 출처는 링크가 없어 발언일이 유일한 대조 단서다 */
+.source-dates {
+  font-size: 0.74rem;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.welcome-authority {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bg-container);
+  border: 1px solid var(--border-color);
+  font-size: 0.68rem;
+  color: var(--text-tertiary);
+}

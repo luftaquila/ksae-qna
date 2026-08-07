@@ -381,7 +381,7 @@ def add_credits(user_id: int, amount: int) -> int | None:
     )
     conn.execute(
         "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
-        (user_id, amount, "purchase", "크레딧 구매"),
+        (user_id, amount, "purchase", "이용권 구매"),
     )
     conn.commit()
     row = conn.execute("SELECT credits FROM users WHERE id = ?", (user_id,)).fetchone()
