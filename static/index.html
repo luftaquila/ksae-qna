@@ -1,9 +1,10 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PitBot</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>PitBot · KSAE Q&A</title>
   <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -16,12 +17,13 @@
     })();
   </script>
 </head>
-<body>
+<body class="chat-page">
+  <a class="skip-link" href="#chat">대화 내용으로 건너뛰기</a>
   <div class="app-layout">
     <header>
       <div class="header-top">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <button id="sidebar-toggle" class="sidebar-toggle" aria-label="메뉴">
+        <div class="header-leading">
+          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="대화 목록 열기">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="3" y1="12" x2="21" y2="12"></line>
               <line x1="3" y1="6" x2="21" y2="6"></line>
@@ -29,21 +31,24 @@
             </svg>
           </button>
           <a href="/" class="header-brand">
-            <img src="/static/logo.svg" alt="PitBot" class="header-logo">
+            <img src="/static/logo.svg" alt="" class="header-logo">
             <h1>PitBot</h1>
           </a>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;">
+        <div class="header-actions">
           <div id="auth-area"></div>
-          <button id="theme-toggle" class="theme-toggle" aria-label="테마 전환">🌙</button>
+          <button id="theme-toggle" class="theme-toggle" type="button" aria-label="다크 모드로 전환"></button>
         </div>
       </div>
     </header>
 
     <div class="content-area">
-      <aside id="sidebar" class="sidebar">
-        <button id="new-chat-btn" class="new-chat-btn">+ 새 대화</button>
-        <div id="session-list" class="session-list"></div>
+      <aside id="sidebar" class="sidebar" aria-label="대화 목록">
+        <button id="new-chat-btn" class="new-chat-btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          새 대화
+        </button>
+        <nav id="session-list" class="session-list" aria-label="저장된 대화"></nav>
       </aside>
       <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
@@ -57,11 +62,11 @@
                소스 칩·필터는 /api/collections 응답으로 렌더된다. -->
           <div class="control-bar">
             <div class="control-group model-group">
-              <span class="control-label">모델</span>
+              <label class="control-label" for="model-select">모델</label>
               <select id="model-select" class="model-select"></select>
             </div>
             <div class="control-group source-group">
-              <span class="control-label">검색 소스</span>
+              <span class="control-label">검색 범위</span>
               <div id="collection-chips" class="collection-selector"></div>
             </div>
           </div>
@@ -69,11 +74,15 @@
             <input
               id="query"
               type="text"
-              placeholder="질문을 입력하세요..."
+              maxlength="2000"
+              placeholder="KSAE 규정이나 현장 Q&A를 질문하세요"
               autocomplete="off"
               required
             >
-            <button type="submit" id="send">전송</button>
+            <button type="submit" id="send" aria-label="질문 보내기">
+              <span>보내기</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4 14-3-5-7-2Z"/></svg>
+            </button>
           </div>
         </form>
       </div>

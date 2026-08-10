@@ -305,13 +305,21 @@ function initTheme() {
   const saved = localStorage.getItem("theme");
   const theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   document.documentElement.setAttribute("data-theme", theme);
-  themeToggle.textContent = theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
+  renderThemeToggle(theme);
 }
 
 function setTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   localStorage.setItem("theme", theme);
-  themeToggle.textContent = theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
+  renderThemeToggle(theme);
+}
+
+function renderThemeToggle(theme) {
+  const dark = theme === "dark";
+  themeToggle.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+  themeToggle.innerHTML = dark
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.2A8.5 8.5 0 0 1 8.8 4 8.5 8.5 0 1 0 20 15.2Z"/></svg>';
 }
 
 themeToggle.addEventListener("click", () => {
@@ -323,7 +331,7 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e)
   if (!localStorage.getItem("theme")) {
     const theme = e.matches ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", theme);
-    themeToggle.textContent = theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
+    renderThemeToggle(theme);
   }
 });
 
@@ -335,6 +343,7 @@ form.addEventListener("submit", async (e) => {
   const query = queryInput.value.trim();
   if (!query) return;
 
+  chat.querySelector(".welcome")?.remove();
   appendMessage("user", query);
   queryInput.value = "";
   setLoading(true);
@@ -514,8 +523,8 @@ function appendAssistantShell() {
   const el = document.createElement("div");
   el.className = "msg assistant";
   el.innerHTML = `
-    <div class="sources"></div>
     <div class="answer"><span class="loading-dots">검색 중</span></div>
+    <div class="sources"></div>
   `;
   chat.appendChild(el);
   scrollToBottom();
@@ -671,16 +680,21 @@ function renderCollectionChips() {
   host.innerHTML = "";
 
   for (const c of availableCollections) {
+    const option = document.createElement("span");
+    option.className = "collection-option";
+
     const label = document.createElement("label");
     label.className = "collection-chip";
     label.title = c.description;
     label.innerHTML =
       `<input type="checkbox" name="collections" value="${escapeAttr(c.key)}" checked>` +
       `<span>${escapeHtml(c.label)}</span>`;
-    host.appendChild(label);
+    option.appendChild(label);
 
-    if (c.filter === "category") host.appendChild(buildCategorySelect());
-    if (c.filter === "confidence") host.appendChild(buildConfidenceSelect(c.key));
+    if (c.filter === "category") option.appendChild(buildCategorySelect());
+    if (c.filter === "confidence") option.appendChild(buildConfidenceSelect(c.key));
+
+    host.appendChild(option);
 
     label.querySelector("input").addEventListener("change", syncFilterStates);
   }
@@ -732,29 +746,20 @@ function syncFilterStates() {
   }
 }
 
-function buildWelcomeSourceRows() {
-  const rows = availableCollections.map(
-    (c) => `<li><b>${escapeHtml(c.label)}</b> &mdash; ${escapeHtml(c.description)}</li>`
-  );
-  return rows.join("");
+function buildWelcomeSourceSummary() {
+  return availableCollections.length
+    ? availableCollections.map((collection) => escapeHtml(collection.label)).join(" · ")
+    : "검색 범위 불러오는 중";
 }
 
 // ---------------------------------------------------------------------------
 // Welcome screen
 // ---------------------------------------------------------------------------
-function buildWelcomeModelRows() {
+function buildWelcomeModelSummary() {
   const models = availableModels.filter((m) => m.available);
-  if (!models.length) return "";
-  // Group models into rows of 2
-  const rows = [];
-  for (let i = 0; i < models.length; i += 2) {
-    const pair = models.slice(i, i + 2);
-    const spans = pair.map((m) => {
-      return `<span class="welcome-model">${escapeHtml(m.label)} (${m.credits})</span>`;
-    }).join("");
-    rows.push(`<div class="welcome-models-row">${spans}</div>`);
-  }
-  return rows.join("");
+  return models.length
+    ? models.map((model) => `${escapeHtml(model.label)} · ${Number(model.credits).toLocaleString()} 이용권`).join(" / ")
+    : "사용 가능한 모델 없음";
 }
 
 function showWelcome() {
@@ -770,29 +775,20 @@ function showWelcome() {
 
   chat.innerHTML = `
     <div class="welcome">
-      <div>
-        <div class="welcome-title">PitBot</div>
-        <p class="welcome-subtitle">자작자동차 규정 및 Q&A 챗봇</p>
-      </div>
-      <div class="welcome-models">
-        <div class="welcome-models-title">사용 가능 모델 (소모 이용권)</div>
-        <div class="welcome-models-grid">
-          ${buildWelcomeModelRows()}
+      <img class="welcome-logo" src="/static/logo.svg" alt="">
+      <h2 class="welcome-title">KSAE 관련 질문을 입력하세요</h2>
+      <p class="welcome-subtitle">규정집과 축적된 현장 Q&A를 검색해 답변합니다.</p>
+      <div class="welcome-meta">
+        <div class="welcome-meta-row">
+          <span class="welcome-meta-label">사용 모델</span>
+          <span class="welcome-meta-value">${buildWelcomeModelSummary()}</span>
+        </div>
+        <div class="welcome-meta-row">
+          <span class="welcome-meta-label">검색 대상</span>
+          <span class="welcome-meta-value">${buildWelcomeSourceSummary()}</span>
         </div>
       </div>
-      <div class="welcome-items">
-        <div class="welcome-item">
-          <span class="welcome-icon">&#9889;</span>
-          <span>질문 1회당 선택한 모델에 따라 이용권이 차감됩니다</span>
-        </div>
-        <div class="welcome-item">
-          <span class="welcome-icon">&#128218;</span>
-          <span>입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.
-            <ul class="welcome-chip-list">${buildWelcomeSourceRows()}</ul>
-          </span>
-        </div>
-      </div>
-      <div class="welcome-warn">LLM은 실수하거나 잘못된 정보를 제공할 수 있으며, AI 답변은 차량검차 시 근거자료로 사용할 수 없습니다.</div>
+      <div class="welcome-warn">AI 답변은 차량 검차의 근거 자료로 사용할 수 없습니다. 중요한 내용은 답변에 표시된 원문과 함께 확인하세요.</div>
       <div class="welcome-contact">문의: <a href="mailto:mail@luftaquila.io">mail@luftaquila.io</a></div>
       ${loginHtml}
     </div>

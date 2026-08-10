@@ -19,13 +19,21 @@ function initTheme() {
   const saved = localStorage.getItem("theme");
   const theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   document.documentElement.setAttribute("data-theme", theme);
-  themeToggle.textContent = theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
+  renderThemeToggle(theme);
 }
 
 function setTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   localStorage.setItem("theme", theme);
-  themeToggle.textContent = theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19";
+  renderThemeToggle(theme);
+}
+
+function renderThemeToggle(theme) {
+  const dark = theme === "dark";
+  themeToggle.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+  themeToggle.innerHTML = dark
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.2A8.5 8.5 0 0 1 8.8 4 8.5 8.5 0 1 0 20 15.2Z"/></svg>';
 }
 
 themeToggle.addEventListener("click", () => {
@@ -56,9 +64,13 @@ async function checkAdmin() {
 let convLoaded = false;
 document.querySelectorAll(".admin-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
-    document.querySelectorAll(".admin-tab").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".admin-tab").forEach((t) => {
+      t.classList.remove("active");
+      t.setAttribute("aria-selected", "false");
+    });
     document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
     tab.classList.add("active");
+    tab.setAttribute("aria-selected", "true");
     document.getElementById(`tab-${tab.dataset.tab}`).classList.add("active");
     if (tab.dataset.tab === "conversations" && !convLoaded) {
       convLoaded = true;
@@ -644,12 +656,8 @@ function renderModels() {
   grid.innerHTML = allModels.map((m, idx) => {
     const providerLabel = m.provider === "gemini" ? "Google Gemini" : "Anthropic";
     const providerStatus = !m.provider_available
-      ? `<span class="model-provider-status disconnected">미연결</span>`
-      : m.healthy === false
-        ? `<span class="model-provider-status disconnected">Canary 실패</span>`
-        : m.healthy === true
-          ? `<span class="model-provider-status connected">정상</span>`
-          : `<span class="model-provider-status connected">연결됨</span>`;
+      ? `<span class="model-provider-status disconnected">API 키 없음</span>`
+      : `<span class="model-provider-status connected">API 키 설정됨</span>`;
     const resolvedModel = m.resolved_model
       ? `<span class="model-card-resolved">→ ${escapeHtml(m.resolved_model)}</span>`
       : "";

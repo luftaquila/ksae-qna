@@ -1,9 +1,10 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PitBot Admin</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>PitBot · 관리자</title>
   <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/admin.css">
@@ -17,35 +18,37 @@
     })();
   </script>
 </head>
-<body>
+<body class="admin-page">
+  <a class="skip-link" href="#admin-content">관리 내용으로 건너뛰기</a>
   <div class="admin-layout">
     <div class="admin-header">
       <div class="admin-header-left">
         <a href="/" class="header-brand">
-          <img src="/static/logo.svg" alt="PitBot" class="header-logo">
+          <img src="/static/logo.svg" alt="" class="header-logo">
           <h1>PitBot</h1>
         </a>
-        <span class="admin-badge">Admin</span>
+        <span class="admin-badge">관리자</span>
       </div>
       <div class="admin-header-right">
         <a href="/" class="admin-back-link">채팅으로 돌아가기</a>
-        <button id="theme-toggle" class="theme-toggle" aria-label="테마 전환">🌙</button>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="다크 모드로 전환"></button>
       </div>
     </div>
 
-    <div class="admin-tabs">
-      <button class="admin-tab active" data-tab="users">사용자 관리</button>
-      <button class="admin-tab" data-tab="conversations">대화 기록</button>
-      <button class="admin-tab" data-tab="models">모델 관리</button>
-      <button class="admin-tab" data-tab="settings">설정</button>
+    <div class="admin-tabs" role="tablist" aria-label="관리 메뉴">
+      <button class="admin-tab active" type="button" role="tab" aria-selected="true" data-tab="users">사용자</button>
+      <button class="admin-tab" type="button" role="tab" aria-selected="false" data-tab="conversations">대화 기록</button>
+      <button class="admin-tab" type="button" role="tab" aria-selected="false" data-tab="models">모델</button>
+      <button class="admin-tab" type="button" role="tab" aria-selected="false" data-tab="settings">설정</button>
     </div>
 
-    <div class="admin-content">
+    <main id="admin-content" class="admin-content">
       <!-- Users Tab -->
       <div id="tab-users" class="tab-panel active">
         <div id="usage-summary" class="usage-summary"></div>
         <div class="admin-search">
-          <input type="text" id="user-search" placeholder="이름 또는 이메일로 검색...">
+          <label class="visually-hidden" for="user-search">사용자 검색</label>
+          <input type="search" id="user-search" placeholder="이름 또는 이메일 검색" autocomplete="off">
         </div>
         <table class="users-table">
           <thead>
@@ -126,7 +129,7 @@
           </div>
         </div>
       </div>
-    </div>
+    </main>
   </div>
 
   <script src="/static/admin.js"></script>

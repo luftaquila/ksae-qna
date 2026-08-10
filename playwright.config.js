@@ -7,7 +7,10 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,
-  expect: { timeout: 5_000 },
+  expect: {
+    timeout: 5_000,
+    toHaveScreenshot: { maxDiffPixelRatio: 0.001 },
+  },
   reporter: [["line"]],
   use: {
     ...(executablePath ? { launchOptions: { executablePath } } : {}),
