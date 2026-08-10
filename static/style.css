@@ -879,20 +879,38 @@ header {
 }
 
 .welcome-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
   padding: 13px 2px;
   border-bottom: 1px solid var(--border-color);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
+  line-height: 1.65;
 }
 
 .welcome-item:last-child { border-bottom: 0; }
 
+.welcome-item > span:last-child {
+  min-width: 0;
+  flex: 1;
+}
+
+.welcome-icon {
+  width: 24px;
+  flex: 0 0 24px;
+  font-size: 17px;
+  line-height: 1.45;
+  text-align: center;
+}
+
 .welcome-chip-list {
   display: grid;
-  gap: 5px;
-  margin: 9px 0 0;
+  gap: 6px;
+  margin: 8px 0 0;
   padding: 0;
   color: var(--text-tertiary);
+  font-size: 14px;
   list-style: none;
 }
 
@@ -909,14 +927,14 @@ header {
   max-width: 560px;
   margin: 22px auto 0;
   color: var(--text-tertiary);
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 13.5px;
+  line-height: 1.7;
 }
 
 .welcome-contact {
   margin-top: 8px;
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .welcome-contact a { color: var(--color-primary); text-decoration: none; }

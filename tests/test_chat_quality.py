@@ -72,6 +72,32 @@ def test_prompt_forbids_unsupported_permission_claims():
     assert "허용 여부·검차 판단은 단정하지 마세요" in prompt
 
 
+def test_aark_search_ignores_legacy_confidence_filter(monkeypatch):
+    captured_filters = []
+
+    class FakeEmbedding:
+        def encode(self, _query):
+            return SimpleNamespace(tolist=lambda: [1.0])
+
+    def fake_search(_vector, _collection, _limit, _score, query_filter, *_args):
+        captured_filters.append(query_filter)
+        return []
+
+    chat._search_cache.clear()
+    monkeypatch.setattr(chat, "_model", FakeEmbedding())
+    monkeypatch.setattr(chat, "_search_collection", fake_search)
+
+    chat.search_with_metadata(
+        "질문",
+        collections=["kb"],
+        confidence=["합의됨"],
+    )
+
+    assert "filter" not in chat.COLLECTION_REGISTRY["kb"]
+    assert captured_filters == [None]
+    chat._search_cache.clear()
+
+
 def test_pro_failure_before_first_token_falls_back_to_flash(monkeypatch):
     async def no_rewrite(_query, _history):
         return None

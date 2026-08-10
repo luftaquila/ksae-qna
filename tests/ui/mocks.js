@@ -6,7 +6,7 @@ export const chatModels = [
 export const collections = [
   { key: "rules", label: "규정", description: "대회 규정집 (2026 Formula)" },
   { key: "qna", label: "Q&A", description: "KSAE Q&A 게시판", filter: "category" },
-  { key: "kb", label: "AARK", description: "참가팀 익명 단톡방 지식베이스", filter: "confidence" },
+  { key: "kb", label: "AARK", description: "참가팀 익명 단톡방 지식베이스" },
 ];
 
 export const users = [
@@ -76,7 +76,7 @@ export async function installChatMocks(page) {
     const path = url.pathname;
     if (path === "/api/me") return route.fulfill({ json: { user: { id: 1, name: "김피트", email: "pit@example.com", picture: null, credits: 18, is_admin: true }, low_credit_threshold: 5, unlimited_credits: false } });
     if (path === "/api/models") return route.fulfill({ json: { models: chatModels } });
-    if (path === "/api/collections") return route.fulfill({ json: { collections, confidence_levels: ["합의됨", "다수의견", "단일제보", "미해결"] } });
+    if (path === "/api/collections") return route.fulfill({ json: { collections } });
     if (path === "/api/sessions") return route.fulfill({ json: { sessions: [{ id: 10, title: "Formula 지상고 기준" }] } });
     if (path === "/api/transactions") return route.fulfill({ json: { transactions: [] } });
     if (path === "/api/chat") {

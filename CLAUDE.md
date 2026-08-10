@@ -66,7 +66,7 @@ python mcp_server.py
 |---|---|---|---|---|
 | `rules` | `ksae-formula-rules` | 규정 | 공식 | — |
 | `qna` | `ksae-qna` | Q&A | 공식 해석 | `category` |
-| `kb` | `ksae-aark-kb` | AARK | 경험담 | `confidence` |
+| `kb` | `ksae-aark-kb` | AARK | 경험담 | — |
 
 지식베이스는 `url`이 없다(익명 채팅이라 링크할 원문이 없음). 대신 `dates`·`confidence`를
 검색 결과에 실어 보내 UI가 발언일과 신뢰도 배지로 표시한다.
@@ -96,8 +96,8 @@ RRF 융합은 v1과 품질이 사실상 같다. 지연은 공개 HTTPS 경유라
 부품번호 검색을 정말 개선하려면 전면 전환이 아니라 **질의 유형 라우팅**
 (코드 토큰 단독 질의일 때만 어휘 arm 가중)이 맞는 방향이다.
 
-**신뢰도 필터 주의** — 표·단편 청크는 `confidence`가 빈 문자열이다. 필터를 `must`로 걸면
-표가 통째로 사라지므로 `should`(OR)에 `MatchValue("")`를 함께 넣는다.
+**AARK 신뢰도** — 검색 단계에서는 신뢰도로 거르지 않고 모든 청크를 대상으로 한다.
+`confidence`는 검색 결과의 합의 수준 배지와 답변 표현을 위한 메타데이터로만 사용한다.
 
 검색 시 컬렉션별 `limit`개 조회 → score 순 병합 → `min_per_collection` 보장 →
 `MAX_CHUNKS_PER_POST`(post_id) + `MAX_CHUNKS_PER_SECTION`(section) 중복 제거.

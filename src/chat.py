@@ -62,12 +62,10 @@ COLLECTION_REGISTRY: dict[str, dict] = {
         "label": "AARK",
         "description": "참가팀 익명 단톡방 지식베이스 (2025-02 ~ 2026-08)",
         "authority": "경험담",
-        "filter": "confidence",
     },
 }
 
 COLLECTIONS = {key: meta["collection"] for key, meta in COLLECTION_REGISTRY.items()}
-CONFIDENCE_LEVELS = ("합의됨", "다수의견", "단일제보", "미해결")
 
 # 같은 소주제(section)에서 올라오는 청크 상한. AARK는 항목 하나가 곧 post_id라
 # MAX_CHUNKS_PER_POST 가 사실상 동작하지 않아 별도 상한이 필요하다.
@@ -546,7 +544,9 @@ def search_with_metadata(
     but is intentionally not enforced.  A low-relevance collection no longer
     receives a guaranteed context slot.
     """
-    del min_per_collection
+    # ``confidence`` is retained only for backward-compatible callers. AARK
+    # retrieval always searches every confidence level.
+    del min_per_collection, confidence
     if not collections:
         collections = list(COLLECTIONS.keys())
     valid_keys = [key for key in collections if key in COLLECTIONS]
@@ -564,7 +564,7 @@ def search_with_metadata(
     candidate_limit = max(limit * 4, 24)
     cache_key = hashlib.sha256(
         f"{query}|{candidate_limit}|{min_score}|{','.join(sorted(valid_keys))}"
-        f"|{category}|{','.join(sorted(confidence or []))}".encode()
+        f"|{category}".encode()
     ).hexdigest()
     now = time.monotonic()
     cached = _search_cache.get(cache_key)
@@ -585,16 +585,9 @@ def search_with_metadata(
             must=[models.FieldCondition(key="category", match=models.MatchValue(value=category))]
         )
 
-    confidence_filter = None
-    levels = [c for c in (confidence or []) if c in CONFIDENCE_LEVELS]
-    if levels and len(levels) < len(CONFIDENCE_LEVELS):
-        confidence_filter = models.Filter(
-            must=[models.FieldCondition(key="confidence", match=models.MatchAny(any=levels))]
-        )
-
     collection_filters = {
         COLLECTIONS.get("qna"): category_filter,
-        COLLECTIONS.get("kb"): confidence_filter,
+        COLLECTIONS.get("kb"): None,
     }
 
     per_collection: dict[str, list[dict]] = {}
@@ -1185,6 +1178,9 @@ async def search_and_stream(
     collections: list of collection keys ("qna", "rules") to search.
     model: model key from MODEL_CONFIG.
     """
+    # Legacy callers may still pass ``confidence``; it is intentionally
+    # ignored so AARK retrieval always covers the complete collection.
+    del confidence
     model_config = MODEL_CONFIG[model]
 
     # Step 1: Rewrite query for better search if we have conversation history
@@ -1206,7 +1202,7 @@ async def search_and_stream(
     sources, retrieval_meta = await loop.run_in_executor(
         None,
         lambda: search_with_metadata(
-            search_query, limit, min_score, collections, category, confidence
+            search_query, limit, min_score, collections, category
         ),
     )
 
@@ -1216,7 +1212,7 @@ async def search_and_stream(
         original_sources, original_meta = await loop.run_in_executor(
             None,
             lambda: search_with_metadata(
-                query, limit, min_score, collections, category, confidence
+                query, limit, min_score, collections, category
             ),
         )
         merged: dict[tuple[str, str], dict] = {}

@@ -63,7 +63,6 @@ from src.auth import (
 )
 from src.chat import (
     COLLECTION_REGISTRY,
-    CONFIDENCE_LEVELS,
     MODEL_CONFIG,
     PROMPT_VERSION,
     get_all_models_admin,
@@ -141,7 +140,6 @@ class ChatRequest(BaseModel):
     collections: list[str] | None = None
     category: str | None = None
     competition: str | None = None
-    confidence: list[str] | None = None
     model: str = "gemini-3-flash"
 
 
@@ -332,8 +330,7 @@ async def collections_list():
         "collections": [
             {"key": key, **{k: v for k, v in meta.items() if k != "collection"}}
             for key, meta in COLLECTION_REGISTRY.items()
-        ],
-        "confidence_levels": list(CONFIDENCE_LEVELS),
+        ]
     }
 
 
@@ -354,9 +351,6 @@ async def chat(request: Request, req: ChatRequest):
     invalid_collections = set(req.collections or []) - set(COLLECTION_REGISTRY)
     if invalid_collections:
         return JSONResponse({"error": "지원하지 않는 검색 소스가 포함되어 있습니다"}, status_code=400)
-    invalid_confidence = set(req.confidence or []) - set(CONFIDENCE_LEVELS)
-    if invalid_confidence:
-        return JSONResponse({"error": "지원하지 않는 신뢰도 값이 포함되어 있습니다"}, status_code=400)
     if req.competition not in (None, "smart_e_mobility", "e_formula", "formula", "baja", "ev"):
         return JSONResponse({"error": "지원하지 않는 대회 종목입니다"}, status_code=400)
 
@@ -396,7 +390,7 @@ async def chat(request: Request, req: ChatRequest):
             collections=json.dumps(req.collections, ensure_ascii=False) if req.collections else None,
             category=req.category,
             competition=req.competition,
-            confidence=json.dumps(req.confidence, ensure_ascii=False) if req.confidence else None,
+            confidence=None,
             prompt_version=PROMPT_VERSION,
         )
         if req.session_id and session["title"] == "새 대화":
@@ -464,7 +458,6 @@ async def chat(request: Request, req: ChatRequest):
                 collections=req.collections,
                 category=req.category,
                 competition=req.competition,
-                confidence=req.confidence,
                 model=req.model,
             ):
                 event_type, payload = parse_event(event)

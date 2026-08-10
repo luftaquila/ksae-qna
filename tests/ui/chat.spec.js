@@ -28,8 +28,10 @@ test("chat sends a question and renders streamed evidence", async ({ page }) => 
   await installChatMocks(page);
   await page.goto("/static/index.html");
   await page.waitForFunction(() => document.fonts.status === "loaded");
+  const chatRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/chat");
   await page.locator("#query").fill("지상고 기준은?");
   await page.locator("#query").press("Enter");
+  expect((await chatRequest).postDataJSON()).not.toHaveProperty("confidence");
   await expect(page.locator(".msg.assistant .answer")).toContainText("측정 조건을 먼저 확인해야 합니다");
   await expect(page.getByRole("button", { name: /참고 문서 1건/ })).toBeVisible();
   await expect(page.locator("#credit-badge")).toContainText("14 이용권");
@@ -57,6 +59,9 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   await expect(page.locator(".welcome-subtitle")).toHaveText("자작자동차 규정 및 Q&A 챗봇");
   await expect(page.locator(".welcome-items")).toContainText("질문 1회당 선택한 모델에 따라 이용권이 차감됩니다");
   await expect(page.locator(".welcome-items")).toContainText("입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.");
+  await expect(page.locator(".welcome-icon")).toHaveText(["⚡", "📚"]);
+  const guideFontSize = await page.locator(".welcome-item").first().evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+  expect(guideFontSize).toBeGreaterThanOrEqual(15);
   await expect(page.locator(".welcome-warn")).toHaveText("LLM은 실수하거나 잘못된 정보를 제공할 수 있으며, AI 답변은 차량검차 시 근거자료로 사용할 수 없습니다.");
   await expect(page.locator(".welcome")).not.toContainText("사용 모델");
   await expect(page.locator("#query")).toHaveAttribute("placeholder", "질문을 입력하세요...");
@@ -75,6 +80,13 @@ test("collection chips keep their width when toggled", async ({ page }) => {
     const unselectedWidth = await chip.evaluate((element) => element.getBoundingClientRect().width);
     expect(unselectedWidth).toBe(selectedWidth);
   }
+});
+
+test("AARK always searches every confidence level", async ({ page }) => {
+  await installChatMocks(page);
+  await page.goto("/static/index.html");
+  await expect(page.locator("#confidence-select")).toHaveCount(0);
+  await expect(page.locator('.collection-chip input[value="kb"]')).toBeChecked();
 });
 
 for (const width of [320, 375, 414, 768]) {

@@ -356,9 +356,8 @@ form.addEventListener("submit", async (e) => {
     const collections = [...form.querySelectorAll('input[name="collections"]:checked')].map((el) => el.value);
     const categoryEl = document.getElementById("category-select");
     const category = categoryEl && !categoryEl.disabled ? (categoryEl.value || null) : null;
-    const confidence = getSelectedConfidence();
     const model = document.getElementById("model-select").value;
-    const body = { query, collections, category, confidence, model };
+    const body = { query, collections, category, model };
     if (currentSessionId) body.session_id = currentSessionId;
 
     const res = await fetch("/api/chat", {
@@ -657,7 +656,6 @@ function renderModelSelect() {
 // 소스를 추가할 때 이 파일을 고칠 필요가 없다.
 // ---------------------------------------------------------------------------
 let availableCollections = [];
-let confidenceLevels = [];
 
 const CATEGORY_OPTIONS = ["Formula", "Baja", "EV"];
 
@@ -666,10 +664,8 @@ async function loadCollections() {
     const res = await fetch("/api/collections");
     const data = await res.json();
     availableCollections = data.collections || [];
-    confidenceLevels = data.confidence_levels || [];
   } catch {
     availableCollections = [];
-    confidenceLevels = [];
   }
   renderCollectionChips();
 }
@@ -692,7 +688,6 @@ function renderCollectionChips() {
     option.appendChild(label);
 
     if (c.filter === "category") option.appendChild(buildCategorySelect());
-    if (c.filter === "confidence") option.appendChild(buildConfidenceSelect(c.key));
 
     host.appendChild(option);
 
@@ -712,34 +707,10 @@ function buildCategorySelect() {
   return sel;
 }
 
-function buildConfidenceSelect(key) {
-  // 미해결·단일제보는 사용자가 명시적으로 전체/해당 등급을 선택할 때만 포함한다.
-  const sel = document.createElement("select");
-  sel.id = "confidence-select";
-  sel.className = "category-select";
-  sel.dataset.collection = key;
-  sel.title = "AARK 신뢰도 필터";
-  sel.innerHTML =
-    `<option value="합의됨,다수의견">합의됨·다수의견 (기본)</option>` +
-    `<option value="">신뢰도 전체</option>` +
-    confidenceLevels.map((l) => `<option value="${l}">${l}만</option>`).join("");
-  return sel;
-}
-
-function getSelectedConfidence() {
-  const sel = document.getElementById("confidence-select");
-  if (!sel || sel.disabled || !sel.value) return null;
-  return sel.value.split(",");
-}
-
 function syncFilterStates() {
   for (const c of availableCollections) {
     const box = document.querySelector(`input[name="collections"][value="${c.key}"]`);
-    const sel = c.filter === "category"
-      ? document.getElementById("category-select")
-      : c.filter === "confidence"
-        ? document.getElementById("confidence-select")
-        : null;
+    const sel = c.filter === "category" ? document.getElementById("category-select") : null;
     if (!box || !sel) continue;
     sel.disabled = !box.checked;
     if (!box.checked) sel.value = "";
@@ -772,10 +743,15 @@ function showWelcome() {
       <h2 class="welcome-title">PitBot</h2>
       <p class="welcome-subtitle">자작자동차 규정 및 Q&amp;A 챗봇</p>
       <div class="welcome-items">
-        <div class="welcome-item">질문 1회당 선택한 모델에 따라 이용권이 차감됩니다</div>
         <div class="welcome-item">
-          입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.
-          <ul class="welcome-chip-list">${buildWelcomeSourceRows()}</ul>
+          <span class="welcome-icon" aria-hidden="true">&#9889;</span>
+          <span>질문 1회당 선택한 모델에 따라 이용권이 차감됩니다</span>
+        </div>
+        <div class="welcome-item">
+          <span class="welcome-icon" aria-hidden="true">&#128218;</span>
+          <span>입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.
+            <ul class="welcome-chip-list">${buildWelcomeSourceRows()}</ul>
+          </span>
         </div>
       </div>
       <div class="welcome-warn">LLM은 실수하거나 잘못된 정보를 제공할 수 있으며, AI 답변은 차량검차 시 근거자료로 사용할 수 없습니다.</div>
