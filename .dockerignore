@@ -11,3 +11,14 @@ __pycache__/
 *.egg-info/
 tests/
 bench/
+node_modules/
+playwright-report/
+test-results/
+.agents/
+.hallmark/
+package.json
+package-lock.json
+playwright.config.js
+skills-lock.json
+design.md
+tokens.css

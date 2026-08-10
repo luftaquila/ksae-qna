@@ -1,0 +1,14 @@
+[
+  {
+    "date": "2026-08-10",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "light / display-condensed-bold / warm",
+    "vibe": "technical paddock, exact, warm, utilitarian",
+    "enrichment": "none",
+    "nav": "N3 Side rail, adapted for application navigation",
+    "footer": "none, full-height application shell",
+    "brief": "PitBot chat and administration UI redesign"
+  }
+]

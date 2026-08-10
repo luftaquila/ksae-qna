@@ -1,134 +1,238 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PitBot Admin</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>PitBot · 운영 작업대</title>
   <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" href="/static/admin.css">
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="/static/styles/tokens.css">
+  <link rel="stylesheet" href="/static/styles/base.css">
+  <link rel="stylesheet" href="/static/styles/admin.css">
   <script>
-    (function() {
-      var t = localStorage.getItem("theme");
-      if (t) document.documentElement.setAttribute("data-theme", t);
-      else if (window.matchMedia("(prefers-color-scheme: dark)").matches)
-        document.documentElement.setAttribute("data-theme", "dark");
+    (() => {
+      const saved = localStorage.getItem("theme");
+      const theme = saved || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.dataset.theme = theme;
     })();
   </script>
 </head>
-<body>
-  <div class="admin-layout">
-    <div class="admin-header">
-      <div class="admin-header-left">
-        <a href="/" class="header-brand">
-          <img src="/static/logo.svg" alt="PitBot" class="header-logo">
-          <h1>PitBot</h1>
-        </a>
-        <span class="admin-badge">Admin</span>
-      </div>
-      <div class="admin-header-right">
-        <a href="/" class="admin-back-link">채팅으로 돌아가기</a>
-        <button id="theme-toggle" class="theme-toggle" aria-label="테마 전환">🌙</button>
-      </div>
-    </div>
+<body class="admin-page">
+  <a class="skip-link" href="#admin-main">관리 영역으로 건너뛰기</a>
 
-    <div class="admin-tabs">
-      <button class="admin-tab active" data-tab="users">사용자 관리</button>
-      <button class="admin-tab" data-tab="conversations">대화 기록</button>
-      <button class="admin-tab" data-tab="models">모델 관리</button>
-      <button class="admin-tab" data-tab="settings">설정</button>
-    </div>
+  <div class="admin-frame">
+    <header class="admin-topbar">
+      <a href="/" class="brand" aria-label="PitBot 채팅으로 이동">
+        <span class="brand__mark" aria-hidden="true"></span>
+        <span>
+          <span class="brand__name">PitBot</span>
+          <span class="brand__descriptor">Operations workbench</span>
+        </span>
+      </a>
+      <div class="admin-topbar__actions">
+        <span class="admin-mode">ADMIN</span>
+        <a class="text-button" href="/">채팅으로</a>
+        <button id="theme-toggle" class="icon-button" type="button" aria-label="다크 테마로 전환">
+          <svg class="icon theme-icon theme-icon--moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.2A8.5 8.5 0 0 1 8.8 4 8.5 8.5 0 1 0 20 15.2Z"/></svg>
+          <svg class="icon theme-icon theme-icon--sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+      </div>
+    </header>
 
-    <div class="admin-content">
-      <!-- Users Tab -->
-      <div id="tab-users" class="tab-panel active">
-        <div id="usage-summary" class="usage-summary"></div>
-        <div class="admin-search">
-          <input type="text" id="user-search" placeholder="이름 또는 이메일로 검색...">
+    <div class="admin-shell">
+      <nav class="admin-index" aria-label="관리 메뉴" role="tablist" aria-orientation="vertical">
+        <p class="rail-label admin-index__label">Sections</p>
+        <button id="tab-users-trigger" class="admin-tab" type="button" role="tab" aria-selected="true" aria-controls="tab-users" data-tab="users">
+          <span class="admin-tab__code">US</span><span>사용자</span>
+        </button>
+        <button id="tab-conversations-trigger" class="admin-tab" type="button" role="tab" aria-selected="false" aria-controls="tab-conversations" data-tab="conversations" tabindex="-1">
+          <span class="admin-tab__code">CV</span><span>대화</span>
+        </button>
+        <button id="tab-models-trigger" class="admin-tab" type="button" role="tab" aria-selected="false" aria-controls="tab-models" data-tab="models" tabindex="-1">
+          <span class="admin-tab__code">MD</span><span>모델</span>
+        </button>
+        <button id="tab-settings-trigger" class="admin-tab" type="button" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" tabindex="-1">
+          <span class="admin-tab__code">ST</span><span>설정</span>
+        </button>
+        <div class="admin-index__status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>읽기 / 쓰기 관리 채널</span>
         </div>
-        <table class="users-table">
-          <thead>
-            <tr>
-              <th class="sortable" data-sort="name">사용자 <span class="sort-icon"></span></th>
-              <th class="sortable" data-sort="email">이메일 <span class="sort-icon"></span></th>
-              <th class="sortable" data-sort="credits">이용권 <span class="sort-icon"></span></th>
-              <th class="sortable" data-sort="tokens">API 토큰 <span class="sort-icon"></span></th>
-              <th class="sortable" data-sort="last_active">최근 사용 <span class="sort-icon"></span></th>
-              <th class="sortable" data-sort="created">가입일 <span class="sort-icon"></span></th>
-            </tr>
-          </thead>
-          <tbody id="users-tbody"></tbody>
-        </table>
-      </div>
+      </nav>
 
-      <!-- Models Tab -->
-      <div id="tab-models" class="tab-panel">
-        <p class="models-description">모델 활성화/비활성화 및 표시 순서를 관리합니다. 드래그하여 순서를 변경할 수 있으며, 맨 위 모델이 기본 선택됩니다.</p>
-        <div id="models-grid" class="models-grid"></div>
-      </div>
+      <main id="admin-main" class="admin-main">
+        <section id="tab-users" class="admin-panel" role="tabpanel" aria-labelledby="tab-users-trigger">
+          <header class="panel-head">
+            <div>
+              <p class="rail-label">Accounts / usage</p>
+              <h1>사용자 운영</h1>
+              <p>이용권, 모델별 토큰 사용량, 최근 활동을 한 화면에서 확인합니다.</p>
+            </div>
+            <label class="admin-search" for="user-search">
+              <span class="field__label">사용자 검색</span>
+              <input id="user-search" type="search" placeholder="이름 또는 이메일" autocomplete="off">
+            </label>
+          </header>
 
-      <!-- Settings Tab -->
-      <div id="tab-settings" class="tab-panel">
-        <p class="settings-description">사이트 전역 설정을 관리합니다.</p>
-        <div class="settings-form">
-          <div class="settings-row">
-            <label class="settings-label">무제한 이용권 모드</label>
-            <div class="settings-toggle-row">
-              <label class="toggle-switch">
-                <input type="checkbox" id="setting-unlimited-credits">
-                <span class="toggle-slider"></span>
+          <div id="usage-summary" class="telemetry-strip" aria-live="polite">
+            <div class="telemetry-skeleton skeleton"></div>
+          </div>
+
+          <div class="table-shell">
+            <table class="users-table">
+              <caption class="visually-hidden">PitBot 사용자와 이용량</caption>
+              <thead>
+                <tr>
+                  <th scope="col"><button class="sort-button" type="button" data-sort="name">사용자 <span class="sort-icon" aria-hidden="true"></span></button></th>
+                  <th scope="col"><button class="sort-button" type="button" data-sort="email">이메일 <span class="sort-icon" aria-hidden="true"></span></button></th>
+                  <th scope="col"><button class="sort-button" type="button" data-sort="credits">이용권 <span class="sort-icon" aria-hidden="true"></span></button></th>
+                  <th scope="col"><button class="sort-button" type="button" data-sort="tokens">API 토큰 <span class="sort-icon" aria-hidden="true"></span></button></th>
+                  <th scope="col"><button class="sort-button" type="button" data-sort="last_active">최근 사용 <span class="sort-icon" aria-hidden="true"></span></button></th>
+                  <th scope="col"><button class="sort-button" type="button" data-sort="created">가입일 <span class="sort-icon" aria-hidden="true"></span></button></th>
+                </tr>
+              </thead>
+              <tbody id="users-tbody">
+                <tr><td colspan="6"><div class="table-loading skeleton" aria-label="사용자 불러오는 중"></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="tab-conversations" class="admin-panel" role="tabpanel" aria-labelledby="tab-conversations-trigger" hidden>
+          <header class="panel-head panel-head--compact">
+            <div>
+              <p class="rail-label">Conversation archive</p>
+              <h1>대화 기록</h1>
+              <p>세션을 고르면 질문, 답변, 근거, 모델 사용량을 같은 축에서 검토합니다.</p>
+            </div>
+            <label class="admin-search" for="conv-user-select">
+              <span class="field__label">사용자 필터</span>
+              <select id="conv-user-select"><option value="">전체 사용자</option></select>
+            </label>
+          </header>
+          <div class="conversation-workbench">
+            <section class="conversation-index" aria-label="대화 세션">
+              <div class="conversation-index__head"><span>세션</span><span id="conv-session-count">0</span></div>
+              <div id="conv-session-list" class="conv-session-list"><div class="skeleton"></div></div>
+            </section>
+            <section id="conv-messages" class="conv-messages" aria-live="polite" aria-label="선택한 대화 메시지">
+              <div class="workbench-empty"><strong>대화를 선택하세요.</strong><span>왼쪽 세션 목록에서 검토할 기록을 고르세요.</span></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="tab-models" class="admin-panel" role="tabpanel" aria-labelledby="tab-models-trigger" hidden>
+          <header class="panel-head panel-head--compact">
+            <div>
+              <p class="rail-label">Model routing</p>
+              <h1>모델 관리</h1>
+              <p>활성 상태, 차감 이용권, 기본 순서를 조정합니다. 포커스한 행에서 Alt+↑/↓로도 순서를 바꿀 수 있습니다.</p>
+            </div>
+          </header>
+          <div class="model-table-head" aria-hidden="true"><span>순서 / 모델</span><span>공급자</span><span>차감</span><span>상태</span></div>
+          <div id="models-grid" class="model-list" aria-live="polite"><div class="skeleton"></div><div class="skeleton"></div></div>
+          <div id="model-order-status" class="visually-hidden" aria-live="polite"></div>
+        </section>
+
+        <section id="tab-settings" class="admin-panel" role="tabpanel" aria-labelledby="tab-settings-trigger" hidden>
+          <header class="panel-head panel-head--compact">
+            <div>
+              <p class="rail-label">Site policy</p>
+              <h1>운영 설정</h1>
+              <p>변경 내용은 입력을 마친 뒤 자동 저장됩니다. 일괄 변경만 별도 확인을 거칩니다.</p>
+            </div>
+            <div id="settings-status" class="save-status" aria-live="polite">설정 불러오는 중</div>
+          </header>
+
+          <form id="settings-form" class="settings-form">
+            <fieldset class="settings-group">
+              <legend>이용권 정책</legend>
+              <label class="setting-row" for="setting-unlimited-credits">
+                <span><strong>무제한 이용권 모드</strong><small>모든 사용자의 질문에서 이용권을 차감하지 않습니다.</small></span>
+                <span class="switch-control">
+                  <input id="setting-unlimited-credits" type="checkbox" role="switch">
+                  <span class="switch-track" aria-hidden="true"><span></span></span>
+                  <span id="unlimited-label">비활성</span>
+                </span>
               </label>
-              <span class="toggle-label" id="unlimited-label">비활성</span>
-            </div>
-            <p class="settings-hint">활성화하면 모든 사용자의 이용권이 무제한이 됩니다 (차감 없음)</p>
-          </div>
-          <div class="settings-row">
-            <label class="settings-label" for="setting-default-credits">신규 가입 기본 제공 이용권</label>
-            <div class="settings-input-group">
-              <input type="number" id="setting-default-credits" min="0" max="10000" value="15">
-            </div>
-            <p class="settings-hint">새로 가입하는 사용자에게 자동으로 지급되는 이용권 수</p>
-          </div>
-          <div class="settings-row">
-            <label class="settings-label" for="setting-low-credit-threshold">이용권 부족 경고 기준</label>
-            <div class="settings-input-group">
-              <input type="number" id="setting-low-credit-threshold" min="0" max="10000" value="5">
-            </div>
-            <p class="settings-hint">이용권이 이 값 이하일 때 이용권 칩이 빨간색으로 표시됩니다</p>
-          </div>
-          <div class="settings-row">
-            <label class="settings-label settings-section-title">전체 사용자 이용권 일괄 변경</label>
-            <div class="settings-input-group">
-              <input type="number" id="bulk-credit-value" min="0" max="10000" value="15" placeholder="이용권">
-              <button class="bulk-credit-btn" id="bulk-credit-btn">일괄 적용</button>
-            </div>
-            <p class="settings-hint">모든 사용자의 이용권을 입력한 값으로 일괄 변경합니다</p>
-          </div>
-        </div>
-      </div>
+              <label class="setting-row setting-row--input" for="setting-default-credits">
+                <span><strong>신규 가입 기본 이용권</strong><small>새 계정에 처음 지급할 수량입니다.</small></span>
+                <input id="setting-default-credits" type="number" min="0" max="10000" value="15" inputmode="numeric">
+              </label>
+              <label class="setting-row setting-row--input" for="setting-low-credit-threshold">
+                <span><strong>이용권 부족 기준</strong><small>이 값 이하의 계정을 경고 상태로 표시합니다.</small></span>
+                <input id="setting-low-credit-threshold" type="number" min="0" max="10000" value="5" inputmode="numeric">
+              </label>
+            </fieldset>
 
-      <!-- Conversations Tab -->
-      <div id="tab-conversations" class="tab-panel">
-        <div class="conversations-layout">
-          <div class="conv-sidebar">
-            <div class="conv-sidebar-header">
-              <div class="conv-user-filter">
-                <select id="conv-user-select">
-                  <option value="">전체 사용자</option>
-                </select>
+            <fieldset class="settings-group settings-group--danger">
+              <legend>일괄 작업</legend>
+              <div class="setting-row setting-row--input">
+                <label for="bulk-credit-value"><strong>전체 사용자 이용권 변경</strong><small>모든 계정의 현재 잔액을 같은 값으로 덮어씁니다.</small></label>
+                <div class="bulk-control">
+                  <input id="bulk-credit-value" type="number" min="0" max="10000" value="15" inputmode="numeric">
+                  <button id="bulk-credit-btn" class="button button--danger" type="button">변경 검토</button>
+                </div>
               </div>
-            </div>
-            <div class="conv-session-list" id="conv-session-list"></div>
-          </div>
-          <div class="conv-messages" id="conv-messages">
-            <div class="conv-empty">대화를 선택하세요</div>
-          </div>
-        </div>
-      </div>
+            </fieldset>
+          </form>
+        </section>
+      </main>
     </div>
   </div>
 
-  <script src="/static/admin.js"></script>
+  <dialog id="credit-dialog" aria-labelledby="credit-dialog-title">
+    <form id="credit-form">
+      <div class="dialog__header">
+        <div>
+          <p class="rail-label">Credit adjustment</p>
+          <h2 id="credit-dialog-title" class="dialog__title">사용자 이용권 조정</h2>
+        </div>
+        <button class="icon-button" type="button" data-dialog-close aria-label="이용권 조정 닫기"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="dialog__body">
+        <p id="credit-user" class="dialog-subject"></p>
+        <label class="field" for="credit-value">
+          <span class="field__label">새 이용권 잔액</span>
+          <input id="credit-value" type="number" min="0" max="10000" required inputmode="numeric" aria-describedby="credit-hint">
+          <span id="credit-hint" class="field__hint">현재 잔액을 입력한 값으로 변경합니다.</span>
+        </label>
+      </div>
+      <div class="dialog__footer">
+        <button class="button button--secondary" type="button" data-dialog-close>취소</button>
+        <button id="credit-save" class="button" type="submit">변경 저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="detail-dialog" aria-labelledby="detail-dialog-title">
+    <div class="dialog__header">
+      <div>
+        <p id="detail-dialog-label" class="rail-label">Usage detail</p>
+        <h2 id="detail-dialog-title" class="dialog__title">상세 내역</h2>
+      </div>
+      <button class="icon-button" type="button" data-dialog-close aria-label="상세 내역 닫기"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div id="detail-dialog-body" class="dialog__body" aria-live="polite"></div>
+    <div class="dialog__footer"><button class="button button--secondary" type="button" data-dialog-close>닫기</button></div>
+  </dialog>
+
+  <dialog id="bulk-dialog" aria-labelledby="bulk-dialog-title">
+    <div class="dialog__header">
+      <div>
+        <p class="rail-label">Bulk operation</p>
+        <h2 id="bulk-dialog-title" class="dialog__title">전체 이용권 변경 확인</h2>
+      </div>
+      <button class="icon-button" type="button" data-dialog-close aria-label="일괄 변경 확인 닫기"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="dialog__body"><p id="bulk-dialog-copy"></p></div>
+    <div class="dialog__footer">
+      <button class="button button--secondary" type="button" data-dialog-close>취소</button>
+      <button id="bulk-confirm" class="button button--danger" type="button">전체 변경 실행</button>
+    </div>
+  </dialog>
+
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
+  <script type="module" src="/static/js/admin.js"></script>
 </body>
 </html>
