@@ -63,6 +63,19 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   const guideFontSize = await page.locator(".welcome-item").first().evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
   expect(guideFontSize).toBeGreaterThanOrEqual(15);
   await expect(page.locator(".welcome-warn")).toHaveText("LLM은 실수하거나 잘못된 정보를 제공할 수 있으며, AI 답변은 차량검차 시 근거자료로 사용할 수 없습니다.");
+  await expect(page.locator(".welcome-warn")).toHaveCSS("word-break", "keep-all");
+  await page.setViewportSize({ width: 320, height: 844 });
+  const endingRows = await page.locator(".welcome-warn").evaluate((element) => {
+    const text = element.firstChild;
+    const start = text.length - "없습니다.".length;
+    return Array.from({ length: "없습니다.".length }, (_, offset) => {
+      const range = document.createRange();
+      range.setStart(text, start + offset);
+      range.setEnd(text, start + offset + 1);
+      return Math.round(range.getBoundingClientRect().top);
+    });
+  });
+  expect(new Set(endingRows).size).toBe(1);
   await expect(page.locator(".welcome")).not.toContainText("사용 모델");
   await expect(page.locator("#query")).toHaveAttribute("placeholder", "질문을 입력하세요...");
   await expect(page.locator(".source-group .control-label")).toHaveText("검색 소스");

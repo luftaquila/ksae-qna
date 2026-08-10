@@ -929,6 +929,7 @@ header {
   color: var(--text-tertiary);
   font-size: 13.5px;
   line-height: 1.7;
+  word-break: keep-all;
 }
 
 .welcome-contact {
