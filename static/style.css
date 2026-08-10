@@ -782,6 +782,7 @@ header {
   justify-content: center;
   padding: 4px 9px;
   cursor: pointer;
+  font-weight: 600;
   user-select: none;
 }
 
@@ -791,7 +792,6 @@ header {
   border-color: #bfdbfe;
   color: #1d4ed8;
   background: var(--color-primary-soft);
-  font-weight: 650;
 }
 
 [data-theme="dark"] .collection-chip:has(input:checked) { color: #bfdbfe; border-color: #1e40af; }
@@ -870,7 +870,7 @@ header {
   font-size: 15px;
 }
 
-.welcome-meta {
+.welcome-items {
   width: 100%;
   margin-top: 28px;
   border-top: 1px solid var(--border-color);
@@ -878,18 +878,32 @@ header {
   text-align: left;
 }
 
-.welcome-meta-row {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 16px;
-  padding: 11px 2px;
+.welcome-item {
+  padding: 13px 2px;
   border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
-.welcome-meta-row:last-child { border-bottom: 0; }
-.welcome-meta-label { color: var(--text-tertiary); }
-.welcome-meta-value { color: var(--text-primary); font-weight: 600; }
+.welcome-item:last-child { border-bottom: 0; }
+
+.welcome-chip-list {
+  display: grid;
+  gap: 5px;
+  margin: 9px 0 0;
+  padding: 0;
+  color: var(--text-tertiary);
+  list-style: none;
+}
+
+.welcome-chip-list li {
+  line-height: 1.5;
+}
+
+.welcome-chip-list b {
+  color: var(--text-primary);
+  font-weight: 650;
+}
 
 .welcome-warn {
   max-width: 560px;
@@ -1014,7 +1028,7 @@ header {
   .input-row button span { display: none; }
   .welcome { padding: 36px 4px 72px; }
   .welcome-title { font-size: 22px; }
-  .welcome-meta-row { grid-template-columns: 76px minmax(0, 1fr); gap: 10px; }
+  .welcome-item { padding: 12px 2px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

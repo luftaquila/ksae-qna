@@ -16,7 +16,7 @@ for (const viewport of viewports) {
       await installChatMocks(page);
       await page.goto("/static/index.html");
       await page.waitForFunction(() => document.fonts.status === "loaded");
-      await expect(page.getByRole("heading", { name: "KSAE 관련 질문을 입력하세요" })).toBeVisible();
+      await expect(page.locator(".welcome-title")).toHaveText("PitBot");
       await expect(page).toHaveScreenshot(`chat-${viewport.name}-${theme}.png`, { animations: "disabled" });
     });
   }
@@ -39,7 +39,7 @@ test("chat sends a question and renders streamed evidence", async ({ page }) => 
 test("chat has no serious accessibility violations", async ({ page }) => {
   await installChatMocks(page);
   await page.goto("/static/index.html");
-  await expect(page.getByRole("heading", { name: "KSAE 관련 질문을 입력하세요" })).toBeVisible();
+  await expect(page.locator(".welcome-title")).toHaveText("PitBot");
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(results.violations.filter((violation) => ["serious", "critical"].includes(violation.impact))).toEqual([]);
 });
@@ -48,6 +48,33 @@ test("chat matches the server input limit", async ({ page }) => {
   await installChatMocks(page);
   await page.goto("/static/index.html");
   await expect(page.locator("#query")).toHaveAttribute("maxlength", "2000");
+});
+
+test("chat keeps the original welcome copy", async ({ page }) => {
+  await installChatMocks(page);
+  await page.goto("/static/index.html");
+  await expect(page.locator(".welcome-title")).toHaveText("PitBot");
+  await expect(page.locator(".welcome-subtitle")).toHaveText("자작자동차 규정 및 Q&A 챗봇");
+  await expect(page.locator(".welcome-items")).toContainText("질문 1회당 선택한 모델에 따라 이용권이 차감됩니다");
+  await expect(page.locator(".welcome-items")).toContainText("입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.");
+  await expect(page.locator(".welcome-warn")).toHaveText("LLM은 실수하거나 잘못된 정보를 제공할 수 있으며, AI 답변은 차량검차 시 근거자료로 사용할 수 없습니다.");
+  await expect(page.locator(".welcome")).not.toContainText("사용 모델");
+  await expect(page.locator("#query")).toHaveAttribute("placeholder", "질문을 입력하세요...");
+  await expect(page.locator(".source-group .control-label")).toHaveText("검색 소스");
+  await expect(page.locator("#send span")).toHaveText("전송");
+});
+
+test("collection chips keep their width when toggled", async ({ page }) => {
+  await installChatMocks(page);
+  await page.goto("/static/index.html");
+  const chips = page.locator(".collection-chip");
+  for (let index = 0; index < await chips.count(); index += 1) {
+    const chip = chips.nth(index);
+    const selectedWidth = await chip.evaluate((element) => element.getBoundingClientRect().width);
+    await chip.click();
+    const unselectedWidth = await chip.evaluate((element) => element.getBoundingClientRect().width);
+    expect(unselectedWidth).toBe(selectedWidth);
+  }
 });
 
 for (const width of [320, 375, 414, 768]) {

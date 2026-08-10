@@ -746,20 +746,13 @@ function syncFilterStates() {
   }
 }
 
-function buildWelcomeSourceSummary() {
-  return availableCollections.length
-    ? availableCollections.map((collection) => escapeHtml(collection.label)).join(" · ")
-    : "검색 범위 불러오는 중";
-}
-
 // ---------------------------------------------------------------------------
 // Welcome screen
 // ---------------------------------------------------------------------------
-function buildWelcomeModelSummary() {
-  const models = availableModels.filter((m) => m.available);
-  return models.length
-    ? models.map((model) => `${escapeHtml(model.label)} · ${Number(model.credits).toLocaleString()} 이용권`).join(" / ")
-    : "사용 가능한 모델 없음";
+function buildWelcomeSourceRows() {
+  return availableCollections.map(
+    (collection) => `<li><b>${escapeHtml(collection.label)}</b> &mdash; ${escapeHtml(collection.description)}</li>`
+  ).join("");
 }
 
 function showWelcome() {
@@ -776,19 +769,16 @@ function showWelcome() {
   chat.innerHTML = `
     <div class="welcome">
       <img class="welcome-logo" src="/static/logo.svg" alt="">
-      <h2 class="welcome-title">KSAE 관련 질문을 입력하세요</h2>
-      <p class="welcome-subtitle">규정집과 축적된 현장 Q&A를 검색해 답변합니다.</p>
-      <div class="welcome-meta">
-        <div class="welcome-meta-row">
-          <span class="welcome-meta-label">사용 모델</span>
-          <span class="welcome-meta-value">${buildWelcomeModelSummary()}</span>
-        </div>
-        <div class="welcome-meta-row">
-          <span class="welcome-meta-label">검색 대상</span>
-          <span class="welcome-meta-value">${buildWelcomeSourceSummary()}</span>
+      <h2 class="welcome-title">PitBot</h2>
+      <p class="welcome-subtitle">자작자동차 규정 및 Q&amp;A 챗봇</p>
+      <div class="welcome-items">
+        <div class="welcome-item">질문 1회당 선택한 모델에 따라 이용권이 차감됩니다</div>
+        <div class="welcome-item">
+          입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.
+          <ul class="welcome-chip-list">${buildWelcomeSourceRows()}</ul>
         </div>
       </div>
-      <div class="welcome-warn">AI 답변은 차량 검차의 근거 자료로 사용할 수 없습니다. 중요한 내용은 답변에 표시된 원문과 함께 확인하세요.</div>
+      <div class="welcome-warn">LLM은 실수하거나 잘못된 정보를 제공할 수 있으며, AI 답변은 차량검차 시 근거자료로 사용할 수 없습니다.</div>
       <div class="welcome-contact">문의: <a href="mailto:mail@luftaquila.io">mail@luftaquila.io</a></div>
       ${loginHtml}
     </div>
