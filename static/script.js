@@ -397,31 +397,32 @@ form.addEventListener("submit", async (e) => {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
+        const blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop();
 
-        let eventType = null;
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            eventType = line.slice(7);
-          } else if (line.startsWith("data: ")) {
-            const data = line.slice(6);
+        for (const block of blocks) {
+          let eventType = null;
+          const dataLines = [];
+          for (const line of block.split(/\r?\n/)) {
+            if (line.startsWith("event: ")) eventType = line.slice(7);
+            if (line.startsWith("data: ")) dataLines.push(line.slice(6));
+          }
+          if (!eventType || !dataLines.length) continue;
+          const data = dataLines.join("\n");
 
-            if (eventType === "session") {
-              try {
-                const payload = JSON.parse(data);
-                if (payload.session_id) {
-                  currentSessionId = payload.session_id;
-                  loadSessions();
-                }
-              } catch (e) { console.warn("Failed to parse session event:", e); }
-            } else {
-              handleEvent(eventType, data, sourcesContainer, answerEl, { fullText });
-              if (eventType === "token") {
-                try { fullText += JSON.parse(data); } catch (e) { console.warn("Failed to parse token data:", e); }
+          if (eventType === "session") {
+            try {
+              const payload = JSON.parse(data);
+              if (payload.session_id) {
+                currentSessionId = payload.session_id;
+                loadSessions();
               }
+            } catch (e) { console.warn("Failed to parse session event:", e); }
+          } else {
+            handleEvent(eventType, data, sourcesContainer, answerEl, { fullText });
+            if (eventType === "token") {
+              try { fullText += JSON.parse(data); } catch (e) { console.warn("Failed to parse token data:", e); }
             }
-            eventType = null;
           }
         }
       }
@@ -433,7 +434,7 @@ form.addEventListener("submit", async (e) => {
     }
 
     // Final render
-    answerEl.innerHTML = marked.parse(fullText);
+    renderAnswerContent(answerEl, fullText);
   } catch (err) {
     answerEl.textContent = `오류가 발생했습니다: ${err.message}`;
   }
@@ -457,15 +458,48 @@ function handleEvent(type, data, sourcesContainer, answerEl, state) {
       const dots = answerEl.querySelector(".loading-dots");
       if (dots) dots.textContent = "답변 생성 중";
     } catch (e) { console.warn("Failed to parse sources event:", e); }
+  } else if (type === "retrieval") {
+    try {
+      const retrieval = JSON.parse(data);
+      if (retrieval.status === "partial") {
+        addAnswerNotice(answerEl, "일부 검색 경로가 실패해 사용 가능한 결과만으로 답변했습니다.");
+      }
+    } catch (e) { console.warn("Failed to parse retrieval event:", e); }
+  } else if (type === "fallback") {
+    try {
+      const fallback = JSON.parse(data);
+      const from = availableModels.find((m) => m.id === fallback.from)?.label || fallback.from;
+      const to = availableModels.find((m) => m.id === fallback.to)?.label || fallback.to;
+      addAnswerNotice(answerEl, `${from} 응답에 실패해 ${to}(으)로 자동 전환했습니다. 이용권 차액은 환불됩니다.`);
+    } catch (e) { console.warn("Failed to parse fallback event:", e); }
+  } else if (type === "credits") {
+    try {
+      const credits = JSON.parse(data);
+      if (Number.isInteger(credits.remaining)) updateCreditDisplay(credits.remaining);
+    } catch (e) { console.warn("Failed to parse credits event:", e); }
   } else if (type === "token") {
     try {
       const token = JSON.parse(data);
       state.fullText = (state.fullText || "") + token;
       // Incremental markdown render
-      answerEl.innerHTML = marked.parse(state.fullText);
+      renderAnswerContent(answerEl, state.fullText);
       scrollToBottom();
     } catch (e) { console.warn("Failed to parse token event:", e); }
   }
+}
+
+function addAnswerNotice(answerEl, message) {
+  let notices = [];
+  try { notices = JSON.parse(answerEl.dataset.notices || "[]"); } catch { notices = []; }
+  if (!notices.includes(message)) notices.push(message);
+  answerEl.dataset.notices = JSON.stringify(notices);
+}
+
+function renderAnswerContent(answerEl, markdown) {
+  let notices = [];
+  try { notices = JSON.parse(answerEl.dataset.notices || "[]"); } catch { notices = []; }
+  const noticeHtml = notices.map((notice) => `<div class="answer-notice">${escapeHtml(notice)}</div>`).join("");
+  answerEl.innerHTML = noticeHtml + marked.parse(markdown);
 }
 
 function appendMessage(role, text) {
@@ -639,7 +673,7 @@ function renderCollectionChips() {
   for (const c of availableCollections) {
     const label = document.createElement("label");
     label.className = "collection-chip";
-    label.title = `${c.description} (${c.authority})`;
+    label.title = c.description;
     label.innerHTML =
       `<input type="checkbox" name="collections" value="${escapeAttr(c.key)}" checked>` +
       `<span>${escapeHtml(c.label)}</span>`;
@@ -665,15 +699,15 @@ function buildCategorySelect() {
 }
 
 function buildConfidenceSelect(key) {
-  // AARK는 경험담이라 확실성이 섞여 있다. 기본은 전체, 필요하면 좁힌다.
+  // 미해결·단일제보는 사용자가 명시적으로 전체/해당 등급을 선택할 때만 포함한다.
   const sel = document.createElement("select");
   sel.id = "confidence-select";
   sel.className = "category-select";
   sel.dataset.collection = key;
   sel.title = "AARK 신뢰도 필터";
   sel.innerHTML =
+    `<option value="합의됨,다수의견">합의됨·다수의견 (기본)</option>` +
     `<option value="">신뢰도 전체</option>` +
-    `<option value="합의됨,다수의견">합의됨·다수의견만</option>` +
     confidenceLevels.map((l) => `<option value="${l}">${l}만</option>`).join("");
   return sel;
 }
@@ -700,8 +734,7 @@ function syncFilterStates() {
 
 function buildWelcomeSourceRows() {
   const rows = availableCollections.map(
-    (c) => `<li><b>${escapeHtml(c.label)}</b> &mdash; ${escapeHtml(c.description)}` +
-           ` <span class="welcome-authority">${escapeHtml(c.authority)}</span></li>`
+    (c) => `<li><b>${escapeHtml(c.label)}</b> &mdash; ${escapeHtml(c.description)}</li>`
   );
   return rows.join("");
 }

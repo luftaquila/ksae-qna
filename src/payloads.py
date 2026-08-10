@@ -32,6 +32,7 @@ class QnaPayload(BasePayload):
     author: str
     date: str
     url: str
+    has_answer: bool
 
 
 class RulesPayload(BasePayload):

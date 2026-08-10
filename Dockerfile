@@ -1,4 +1,15 @@
-FROM python:3.12-slim
+FROM python:3.12.13-slim
+
+ARG BUILD_REVISION=unknown
+ARG BUILD_DATE=unknown
+LABEL org.opencontainers.image.title="ksae-qna" \
+      org.opencontainers.image.source="https://github.com/luftaquila/ksae-qna" \
+      org.opencontainers.image.revision=$BUILD_REVISION \
+      org.opencontainers.image.created=$BUILD_DATE
+
+ENV APP_VERSION=$BUILD_REVISION \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 

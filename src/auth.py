@@ -63,10 +63,11 @@ def init_oauth() -> None:
 # Database helpers
 # ---------------------------------------------------------------------------
 def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 
@@ -143,6 +144,13 @@ def init_db() -> None:
     except sqlite3.OperationalError:
         pass  # column already exists
 
+    # Stable request/response correlation.  Older rows intentionally remain
+    # NULL; new chat requests always populate this field.
+    try:
+        conn.execute("ALTER TABLE messages ADD COLUMN turn_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
     # Migrate: add soft-delete column to sessions
     try:
         conn.execute("ALTER TABLE sessions ADD COLUMN deleted_at TEXT")
@@ -160,6 +168,51 @@ def init_db() -> None:
         )
         """
     )
+
+    # One row per chat request.  Message ordering alone is not a reliable
+    # request/response key when a session is used from multiple tabs, and it
+    # cannot preserve provider failures that produce no answer text.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chat_turns (
+            id                  TEXT PRIMARY KEY,
+            session_id          INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            user_message_id     INTEGER REFERENCES messages(id),
+            assistant_message_id INTEGER REFERENCES messages(id),
+            query               TEXT NOT NULL,
+            requested_model     TEXT NOT NULL,
+            resolved_model      TEXT,
+            resolved_model_id   TEXT,
+            rewritten_query     TEXT,
+            collections         TEXT,
+            category            TEXT,
+            competition         TEXT,
+            confidence          TEXT,
+            source_ids          TEXT,
+            retrieval_status    TEXT NOT NULL DEFAULT 'pending',
+            status              TEXT NOT NULL DEFAULT 'pending',
+            error_provider      TEXT,
+            error_code          TEXT,
+            error_message       TEXT,
+            finish_reason       TEXT,
+            prompt_version      TEXT,
+            input_tokens        INTEGER,
+            output_tokens       INTEGER,
+            thinking_tokens     INTEGER,
+            retrieval_ms        INTEGER,
+            rerank_ms           INTEGER,
+            first_token_ms      INTEGER,
+            generation_ms       INTEGER,
+            total_ms            INTEGER,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at        TEXT
+        )
+        """
+    )
+    try:
+        conn.execute("ALTER TABLE chat_turns ADD COLUMN resolved_model_id TEXT")
+    except sqlite3.OperationalError:
+        pass
 
     # Site settings key-value table
     conn.execute(
@@ -185,6 +238,9 @@ def init_db() -> None:
 
     # Index for efficient recent messages query
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages (session_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_turn_id ON messages (turn_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_turns_session_created ON chat_turns (session_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_turns_status_created ON chat_turns (status, created_at)")
 
     conn.commit()
     conn.close()
@@ -521,11 +577,12 @@ def add_message(
     thinking_tokens: int | None = None,
     model: str | None = None,
     rewritten_query: str | None = None,
+    turn_id: str | None = None,
 ) -> dict:
     conn = _get_conn()
     cur = conn.execute(
-        "INSERT INTO messages (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens, model, rewritten_query) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens, model, rewritten_query),
+        "INSERT INTO messages (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens, model, rewritten_query, turn_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (session_id, role, content, sources, input_tokens, output_tokens, thinking_tokens, model, rewritten_query, turn_id),
     )
     conn.execute(
         "UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", (session_id,)
@@ -534,6 +591,140 @@ def add_message(
     row = conn.execute("SELECT * FROM messages WHERE id = ?", (cur.lastrowid,)).fetchone()
     conn.close()
     return dict(row)
+
+
+def create_chat_turn(
+    turn_id: str,
+    session_id: int,
+    user_message_id: int,
+    query: str,
+    requested_model: str,
+    collections: str | None = None,
+    category: str | None = None,
+    competition: str | None = None,
+    confidence: str | None = None,
+    prompt_version: str | None = None,
+) -> dict:
+    """Create an observable chat turn after its user message is persisted."""
+    conn = _get_conn()
+    conn.execute(
+        """
+        INSERT INTO chat_turns (
+            id, session_id, user_message_id, query, requested_model,
+            collections, category, competition, confidence, prompt_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            turn_id,
+            session_id,
+            user_message_id,
+            query,
+            requested_model,
+            collections,
+            category,
+            competition,
+            confidence,
+            prompt_version,
+        ),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM chat_turns WHERE id = ?", (turn_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def complete_chat_turn(
+    turn_id: str,
+    *,
+    assistant_message_id: int | None,
+    resolved_model: str | None,
+    resolved_model_id: str | None,
+    rewritten_query: str | None,
+    competition: str | None,
+    source_ids: str | None,
+    retrieval_status: str,
+    status: str,
+    error_provider: str | None,
+    error_code: str | None,
+    error_message: str | None,
+    finish_reason: str | None,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    thinking_tokens: int | None,
+    retrieval_ms: int | None,
+    rerank_ms: int | None,
+    first_token_ms: int | None,
+    generation_ms: int | None,
+    total_ms: int | None,
+) -> None:
+    """Finalize all observable fields for a chat turn atomically."""
+    conn = _get_conn()
+    conn.execute(
+        """
+        UPDATE chat_turns SET
+            assistant_message_id = ?, resolved_model = ?, resolved_model_id = ?, rewritten_query = ?,
+            competition = COALESCE(?, competition), source_ids = ?,
+            retrieval_status = ?, status = ?, error_provider = ?,
+            error_code = ?, error_message = ?, finish_reason = ?,
+            input_tokens = ?, output_tokens = ?, thinking_tokens = ?,
+            retrieval_ms = ?, rerank_ms = ?, first_token_ms = ?,
+            generation_ms = ?, total_ms = ?, completed_at = datetime('now')
+        WHERE id = ?
+        """,
+        (
+            assistant_message_id,
+            resolved_model,
+            resolved_model_id,
+            rewritten_query,
+            competition,
+            source_ids,
+            retrieval_status,
+            status,
+            error_provider,
+            error_code,
+            error_message,
+            finish_reason,
+            input_tokens,
+            output_tokens,
+            thinking_tokens,
+            retrieval_ms,
+            rerank_ms,
+            first_token_ms,
+            generation_ms,
+            total_ms,
+            turn_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def check_db_health() -> bool:
+    """Return whether the SQLite database accepts a simple read query."""
+    try:
+        conn = _get_conn()
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
+        return True
+    except sqlite3.Error:
+        return False
+
+
+def list_chat_turns(limit: int = 100, status: str | None = None) -> list[dict]:
+    """Return recent turn diagnostics for authenticated admin tooling."""
+    limit = max(1, min(limit, 500))
+    conn = _get_conn()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM chat_turns WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM chat_turns ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 
 def get_messages(session_id: int) -> list[dict]:

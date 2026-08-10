@@ -95,6 +95,7 @@ def _build_chunks_from_segments(
                 "title": post_meta["title"],
                 "date": post_meta["date"],
                 "url": post_meta["url"],
+                "has_answer": bool(post_meta.get("has_answer")),
                 "chunk_index": chunk_index,
                 "text": current_text,
             })
@@ -119,6 +120,7 @@ def _build_chunks_from_segments(
             "title": post_meta["title"],
             "date": post_meta["date"],
             "url": post_meta["url"],
+            "has_answer": bool(post_meta.get("has_answer")),
             "chunk_index": chunk_index,
             "text": current_text,
         })
@@ -138,6 +140,7 @@ def _chunk_text(
             "title": meta["title"],
             "date": meta["date"],
             "url": meta["url"],
+            "has_answer": bool(meta.get("has_answer")),
             "chunk_index": meta.get("chunk_index_start", 0),
             "text": text,
         }]
@@ -217,6 +220,7 @@ def chunk_posts(
                     "title": title,
                     "date": post.get("date", ""),
                     "url": answer_url,
+                    "has_answer": True,
                     "chunk_index_start": chunk_index_start,
                 }
                 chunks = _chunk_text(combined, meta)
@@ -231,6 +235,7 @@ def chunk_posts(
                 "title": title,
                 "date": post.get("date", ""),
                 "url": post.get("url", ""),
+                "has_answer": False,
             }
             chunks = _chunk_text(combined, meta)
             all_chunks.extend(chunks)

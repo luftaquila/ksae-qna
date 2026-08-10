@@ -1,19 +1,22 @@
-requests
-beautifulsoup4
-lxml
-sentence-transformers
-transformers          # src/chunker.py 가 직접 import 한다
-numpy
-qdrant-client
-tqdm
-click
-fastapi
-uvicorn[standard]
-python-dotenv
-google-genai
-authlib
-httpx
-PyJWT
-itsdangerous
-anthropic
-pytest                # tests/
+requests==2.34.2
+beautifulsoup4==4.15.0
+lxml==6.1.1
+sentence-transformers==5.7.0
+transformers==5.14.1          # src/chunker.py 가 직접 import 한다
+torch==2.13.0
+numpy==2.5.1
+scikit-learn==1.9.0
+scipy==1.18.0
+tokenizers==0.22.2
+qdrant-client==1.19.0
+tqdm==4.70.0
+click==8.4.2
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+python-dotenv==1.2.2
+google-genai==2.17.0
+authlib==1.7.2
+httpx==0.28.1
+PyJWT==2.13.0
+itsdangerous==2.2.0
+anthropic==0.120.2

@@ -71,6 +71,13 @@ def test_post_without_answers_is_still_indexed(chunks):
     assert len(p102) == 1
     assert "축전지 격리 요건" in p102[0]["text"]
     assert p102[0]["category"] == "EV"
+    assert p102[0]["has_answer"] is False
+
+
+def test_answer_availability_is_explicit_metadata(chunks):
+    answered = [c for c in chunks if c["post_id"] in (101, 103)]
+    assert answered
+    assert all(c["has_answer"] is True for c in answered)
 
 
 def test_legacy_answer_body_is_supported(chunks):

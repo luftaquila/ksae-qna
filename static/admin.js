@@ -643,9 +643,16 @@ function renderModels() {
 
   grid.innerHTML = allModels.map((m, idx) => {
     const providerLabel = m.provider === "gemini" ? "Google Gemini" : "Anthropic";
-    const providerStatus = m.provider_available
-      ? `<span class="model-provider-status connected">연결됨</span>`
-      : `<span class="model-provider-status disconnected">미연결</span>`;
+    const providerStatus = !m.provider_available
+      ? `<span class="model-provider-status disconnected">미연결</span>`
+      : m.healthy === false
+        ? `<span class="model-provider-status disconnected">Canary 실패</span>`
+        : m.healthy === true
+          ? `<span class="model-provider-status connected">정상</span>`
+          : `<span class="model-provider-status connected">연결됨</span>`;
+    const resolvedModel = m.resolved_model
+      ? `<span class="model-card-resolved">→ ${escapeHtml(m.resolved_model)}</span>`
+      : "";
     const disabled = !m.provider_available ? "disabled" : "";
     const checked = m.admin_enabled ? "checked" : "";
     const isCustom = m.credits !== m.default_credits;
@@ -663,6 +670,7 @@ function renderModels() {
         <div class="model-card-provider">
           <span class="model-card-provider-name">${providerLabel}</span>
           ${providerStatus}
+          ${resolvedModel}
         </div>
         <div class="model-card-credits-row">
           <label class="model-credits-label">차감 이용권</label>
@@ -781,7 +789,7 @@ window.toggleModel = async function (modelKey, enabled) {
     if (res.ok) {
       if (m) {
         m.admin_enabled = enabled;
-        m.available = m.provider_available && enabled;
+        m.available = m.provider_available && m.healthy !== false && enabled;
       }
       renderModels();
     } else {

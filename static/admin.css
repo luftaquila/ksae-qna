@@ -759,6 +759,14 @@
   color: var(--text-secondary);
 }
 
+.model-card-resolved {
+  color: var(--text-tertiary);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .model-provider-status {
   font-size: 0.7rem;
   font-weight: 600;

@@ -10,6 +10,7 @@ import os
 import re
 import time
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -33,6 +34,10 @@ _anthropic: anthropic.AsyncAnthropic | None = None
 _model_enabled: dict[str, bool] = {}
 _model_credits: dict[str, int | None] = {}
 _model_order: dict[str, int] = {}  # model_key -> display_order
+_model_health: dict[str, dict[str, Any]] = {}
+
+PROMPT_VERSION = "2026-08-quality-v2"
+FALLBACK_MODEL_KEY = "gemini-3-flash"
 
 EMBEDDING_MODEL = "BAAI/bge-m3"
 # 검색 소스 레지스트리 — 컬렉션을 추가할 때 고쳐야 하는 유일한 곳.
@@ -69,8 +74,8 @@ CONFIDENCE_LEVELS = ("합의됨", "다수의견", "단일제보", "미해결")
 MAX_CHUNKS_PER_SECTION = 2
 _STREAM_DONE = object()
 
-# Search cache: key -> (timestamp, results)
-_search_cache: dict[str, tuple[float, list[dict]]] = {}
+# Search cache: key -> (timestamp, results, retrieval metadata)
+_search_cache: dict[str, tuple[float, list[dict], dict[str, Any]]] = {}
 _CACHE_TTL = 300  # seconds
 _CACHE_MAX = 100
 MAX_CHUNKS_PER_POST = 2
@@ -86,8 +91,10 @@ MODEL_CONFIG = {
     },
     "gemini-3-pro": {
         "provider": "gemini",
-        "model_id": "gemini-3-pro-preview",
-        "label": "Gemini 3 Pro",
+        # Google-maintained alias: avoids another outage when a dated preview
+        # model is retired.  The resolved version is recorded per turn.
+        "model_id": "gemini-pro-latest",
+        "label": "Gemini Pro (Latest)",
         "credits": 4,
         "thinking_level": "high",
         "pricing": {"input": 2.50, "output": 15.00, "thinking": 15.00},
@@ -111,34 +118,24 @@ MODEL_CONFIG = {
 }
 
 SYSTEM_PROMPT = """\
-당신은 KSAE(한국자동차공학회) 대학생 자작자동차대회 전문 어시스턴트 PitBot입니다.
-사용자의 질문에 대해 정확하고 유용한 답변을 제공합니다.
-답변은 한국어로 작성합니다.
+당신은 KSAE 대학생 자작자동차대회 전문 어시스턴트 PitBot입니다. 답변은 한국어로 작성합니다.
 
-# 데이터 소스
-검색 결과는 세 종류의 소스에서 올 수 있습니다:
-- **규정집**: "[문서 N] 제X장 ... > ..." 형태. 대회 공식 규정이므로 가장 신뢰도가 높습니다.
-- **Q&A 게시판**: "[문서 N] [카테고리] 제목" 형태. 대회 운영진의 질의응답 기록입니다.
-- **AARK 지식베이스**: "[문서 N] [AARK·신뢰도] 분야 > 소주제 > 항목" 형태.
-  참가팀 익명 단톡방에서 추린 현장 경험담이며 **공식 근거가 아닙니다.**
-  머리말의 신뢰도가 합의됨 > 다수의견 > 단일제보 > 미해결 순으로 확실성을 나타냅니다.
+# 근거 사용 원칙
+- 문서의 종류나 명목상 권위보다 **현재 질문에 직접 답하는 정도**를 우선하세요.
+- 검색 문서에 실제로 적힌 내용과 일반 공학 지식을 명확히 구분하세요. 문서에 없는 규정 번호, 수치, 허용 여부를 만들어내지 마세요.
+- Q&A 문서는 `[답변]`에 적힌 내용만 답변 근거로 사용하세요. 질문자의 질문이나 추측을 답변으로 취급하지 마세요.
+- AARK 신뢰도는 정보의 합의 수준입니다. `미해결`은 결론으로 단정하지 말고, `단일제보`는 한 사례임을 밝히세요.
+- 근거끼리 충돌하면 억지로 하나를 정답으로 고르지 말고 충돌 내용과 판단에 필요한 추가 조건을 짚으세요.
+- 검색 결과가 질문과 직접 관련되지 않으면 인용하지 마세요. 규정·검차의 허용 여부를 일반 지식만으로 단정하지 마세요.
 
-세 소스가 상충하면 **규정집 > Q&A > AARK** 순으로 우선합니다.
-단, 규정 해석에 한해서는 Q&A가 공식 해석이므로 규정집보다 우선합니다.
-
-# 답변 규칙
-- 검색 결과에 관련 정보가 있으면 반드시 이를 근거로 활용하여 답변하세요. 특히 규정집 검색 결과는 사용자의 질문과 조금이라도 관련이 있다면 적극적으로 인용하세요.
-- 답변에서 근거가 되는 문서를 인용하세요. 예: "규정집 제3장 3.2절에 따르면...", "Q&A 게시판의 [제목]에서..."
-- URL이 있는 문서는 링크를 포함하세요.
-- 검색 결과에 직접적인 답이 없더라도, 자동차 공학이나 대회 준비에 관한 일반적인 질문이면 당신의 지식을 바탕으로 유용한 답변을 제공하세요. 이 경우 "검색 결과에는 직접적인 관련 정보가 없지만"이라는 전제를 붙이세요.
-- 검색 결과에도 없고 일반 지식으로도 답변하기 어려운 경우에만 솔직히 알려주세요.
-- 규정 관련 답변에는 "정확한 내용은 최신 규정집을 반드시 확인하세요"라는 안내를 포함하세요.
-- Q&A 게시판 내용을 근거로 답변하는 경우 "Q&A 답변 내용은 현행 규정과 다를 수 있으니 유의하세요"라는 안내를 포함하세요.
-- AARK 지식베이스를 근거로 답변하는 경우 출처의 신뢰도를 함께 밝히세요. 예: "다수의견 기준으로는...", "단일 팀 제보이므로 검증이 필요합니다".
-  신뢰도가 "미해결"인 내용은 결론이 아니라 미결 쟁점으로 소개하세요. 검차·규정 판단의 근거로는 제시하지 마세요.
-- 기술적 질문에는 구체적이고 실용적인 답변을 제공하세요.
-- 답변은 마크다운으로 구조화하여 가독성을 높이세요.
-- 자기소개나 인삿말 등을 하지 말고 바로 본론으로 들어가세요.\
+# 답변 방식
+- 먼저 결론을 말하고, 이어서 근거와 적용 조건/예외를 설명하세요.
+- 단순 질문은 3~6문장 정도로 간결하게 답하세요. 복잡한 절차나 비교에만 제목과 목록을 사용하세요.
+- 근거 문서를 자연스럽게 지칭하고 URL이 있으면 링크하세요. 모든 문서를 억지로 인용할 필요는 없습니다.
+- 일반 공학 지식을 보충할 때는 `일반적인 공학 관점에서는`처럼 출처와 구분하세요.
+- 질문이 불완전하거나 대회 종목·차량 조건에 따라 답이 달라지면, 장문의 추측 대신 가장 중요한 확인 질문 하나를 먼저 하세요.
+- 검색 실패와 관련 문서 부재를 구분하세요. 검색 자체가 실패했다면 근거가 없는 답을 생성하지 마세요.
+- 자기소개, 인사말, 상투적인 최신성·권위 경고를 넣지 말고 바로 본론으로 들어가세요.\
 """
 
 
@@ -153,6 +150,7 @@ def init_resources():
     _qdrant = QdrantClient(
         url=os.environ.get("QDRANT_URL", "https://vectordb.luftaquila.io:443"),
         api_key=os.environ.get("QDRANT_API_KEY"),
+        timeout=10,
     )
     print("Qdrant client initialized.")
 
@@ -178,6 +176,121 @@ def init_model_settings() -> None:
         _model_credits[key] = val["credits"]
         if val["display_order"] is not None:
             _model_order[key] = val["display_order"]
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _provider_available(model_key: str) -> bool:
+    cfg = MODEL_CONFIG[model_key]
+    if cfg["provider"] == "gemini":
+        return _gemini is not None
+    if cfg["provider"] == "anthropic":
+        return _anthropic is not None
+    return False
+
+
+def _set_model_health(
+    model_key: str,
+    healthy: bool,
+    *,
+    resolved_model: str | None = None,
+    error: str | None = None,
+) -> None:
+    _model_health[model_key] = {
+        "healthy": healthy,
+        "resolved_model": resolved_model,
+        "error": error,
+        "last_checked_at": _utc_now(),
+    }
+
+
+def _gemini_text(chunk: Any) -> str:
+    """Read visible text without failing on thought/metadata-only chunks."""
+    try:
+        return chunk.text or ""
+    except (AttributeError, ValueError):
+        return ""
+
+
+def run_model_canaries(model_keys: list[str] | None = None) -> None:
+    """Exercise the exact Gemini streaming path before advertising a model.
+
+    A retired alias used to appear healthy until the first paid user request.
+    The canary is deliberately tiny, and a failure only marks that model
+    unavailable; it does not prevent the service or the fallback model from
+    starting.
+    """
+    if os.environ.get("MODEL_CANARY_ENABLED", "true").lower() not in ("1", "true", "yes"):
+        logger.warning("Model startup canaries are disabled")
+        return
+
+    for model_key, cfg in MODEL_CONFIG.items():
+        if model_keys is not None and model_key not in model_keys:
+            continue
+        if cfg["provider"] != "gemini" or not _model_enabled.get(model_key, True):
+            continue
+        if _gemini is None:
+            _set_model_health(model_key, False, error="provider client unavailable")
+            continue
+        try:
+            stream = _gemini.models.generate_content_stream(
+                model=cfg["model_id"],
+                contents="OK라고만 답하세요.",
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=256,
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level=cfg.get("thinking_level") or "minimal"
+                    ),
+                ),
+            )
+            resolved_model = None
+            received = False
+            for chunk in stream:
+                resolved_model = getattr(chunk, "model_version", None) or resolved_model
+                if _gemini_text(chunk):
+                    received = True
+            if not received:
+                raise RuntimeError("canary returned no text")
+            _set_model_health(model_key, True, resolved_model=resolved_model or cfg["model_id"])
+            logger.info("Model canary passed: %s -> %s", model_key, resolved_model or cfg["model_id"])
+        except Exception as exc:
+            _set_model_health(model_key, False, error=str(exc)[:500])
+            logger.exception("Model canary failed: %s", model_key)
+
+
+def check_qdrant_health() -> bool:
+    try:
+        if _qdrant is None:
+            return False
+        response = _qdrant.get_collections()
+        available = {collection.name for collection in response.collections}
+        return set(COLLECTIONS.values()).issubset(available)
+    except Exception:
+        logger.exception("Qdrant health check failed")
+        return False
+
+
+def get_health_status(include_errors: bool = False) -> dict[str, Any]:
+    model_states = {
+        key: {
+            **_model_health.get(key, {"healthy": None, "resolved_model": None, "error": None, "last_checked_at": None}),
+            "available": is_model_available(key),
+        }
+        for key in MODEL_CONFIG
+    }
+    if not include_errors:
+        for state in model_states.values():
+            state.pop("error", None)
+    return {
+        "qdrant": check_qdrant_health(),
+        "models": model_states,
+        "any_model_available": any(state["available"] for state in model_states.values()),
+        "prompt_version": PROMPT_VERSION,
+        "app_version": os.environ.get("APP_VERSION", "development"),
+    }
 
 
 def set_model_admin_settings(model_key: str, enabled: bool, credits: int | None = None) -> None:
@@ -210,11 +323,10 @@ def is_model_available(model: str) -> bool:
         return False
     if not _model_enabled.get(model, True):
         return False
-    if cfg["provider"] == "gemini":
-        return _gemini is not None
-    if cfg["provider"] == "anthropic":
-        return _anthropic is not None
-    return False
+    if not _provider_available(model):
+        return False
+    health = _model_health.get(model)
+    return health is None or health["healthy"]
 
 
 def _sort_key(model_key: str, idx: int) -> int:
@@ -227,18 +339,16 @@ def get_models() -> list[dict]:
     result = []
     for idx, (model_key, cfg) in enumerate(MODEL_CONFIG.items()):
         admin_enabled = _model_enabled.get(model_key, True)
-        provider_ok = True
-        if cfg["provider"] == "gemini" and _gemini is None:
-            provider_ok = False
-        if cfg["provider"] == "anthropic" and _anthropic is None:
-            provider_ok = False
-        available = admin_enabled and provider_ok
+        provider_ok = _provider_available(model_key)
+        health = _model_health.get(model_key, {})
+        available = admin_enabled and provider_ok and health.get("healthy", True)
         result.append({
             "id": model_key,
             "label": cfg["label"],
             "credits": get_effective_credits(model_key),
             "pricing": cfg["pricing"],
             "available": available,
+            "resolved_model": health.get("resolved_model"),
             "_order": _sort_key(model_key, idx),
         })
     result.sort(key=lambda x: x["_order"])
@@ -251,15 +361,11 @@ def get_all_models_admin() -> list[dict]:
     """Return all models with provider_available, admin_enabled, and available status, sorted by display order."""
     result = []
     for idx, (model_key, cfg) in enumerate(MODEL_CONFIG.items()):
-        if cfg["provider"] == "gemini":
-            provider_available = _gemini is not None
-        elif cfg["provider"] == "anthropic":
-            provider_available = _anthropic is not None
-        else:
-            provider_available = False
+        provider_available = _provider_available(model_key)
 
         admin_enabled = _model_enabled.get(model_key, True)
 
+        health = _model_health.get(model_key, {})
         result.append({
             "id": model_key,
             "label": cfg["label"],
@@ -268,7 +374,11 @@ def get_all_models_admin() -> list[dict]:
             "provider": cfg["provider"],
             "provider_available": provider_available,
             "admin_enabled": admin_enabled,
-            "available": provider_available and admin_enabled,
+            "available": provider_available and admin_enabled and health.get("healthy", True),
+            "healthy": health.get("healthy"),
+            "resolved_model": health.get("resolved_model"),
+            "health_error": health.get("error"),
+            "last_checked_at": health.get("last_checked_at"),
             "_order": _sort_key(model_key, idx),
         })
     result.sort(key=lambda x: x["_order"])
@@ -309,6 +419,7 @@ def _search_collection(
     qf: models.Filter | None,
     query_text: str | None = None,
     sparse: models.SparseVector | None = None,
+    error_sink: dict[str, str] | None = None,
 ) -> list[dict]:
     """Search a single Qdrant collection and return formatted hits."""
     try:
@@ -342,6 +453,8 @@ def _search_collection(
     except Exception as e:
         if sparse is not None:
             logger.error("Sparse hybrid search failed for '%s': %s", col_name, e)
+            if error_sink is not None:
+                error_sink[col_name] = f"sparse search failed: {e}"
             return []
         if query_text is not None:
             # Fallback to dense-only search if hybrid fails (e.g., no text index)
@@ -355,9 +468,15 @@ def _search_collection(
                 )
             except Exception as e2:
                 logger.error("Dense search also failed for '%s': %s", col_name, e2)
+                if error_sink is not None:
+                    error_sink[col_name] = f"hybrid and dense search failed: {e2}"
                 return []
+            if error_sink is not None:
+                error_sink[col_name] = f"hybrid search degraded to dense: {e}"
         else:
             logger.error("Qdrant query failed for '%s': %s", col_name, e)
+            if error_sink is not None:
+                error_sink[col_name] = f"dense search failed: {e}"
             return []
 
     # For hybrid (RRF) results, compute actual cosine similarity from returned vectors.
@@ -394,6 +513,12 @@ def _search_collection(
         payload = hit.payload or {}
         content = payload.get("content", "") or payload.get("chunk_text", "")
 
+        # A sizeable part of the archived Q&A collection contains only the
+        # user's question.  Treating that text as an answer was a recurring
+        # source of confident hallucinations.
+        if col_name == COLLECTIONS.get("qna") and "[답변]" not in content:
+            continue
+
         if payload.get("source_type") == "aark":
             # Anonymous community knowledge base: no URL, confidence-graded.
             # Checked before "chapter" since this payload also carries one.
@@ -422,6 +547,14 @@ def _search_collection(
             "source": source,
             "url": url,
             "content": content,
+            "collection": next((key for key, name in COLLECTIONS.items() if name == col_name), col_name),
+            "source_key": str(
+                payload.get("source_key")
+                or payload.get("url")
+                or payload.get("source_file")
+                or payload.get("id")
+                or source
+            ),
         }
         if "id" in payload:
             hit_item["post_id"] = payload["id"]
@@ -433,51 +566,66 @@ def _search_collection(
             hit_item["dates"] = payload["dates"]
         if payload.get("section"):
             hit_item["section"] = payload["section"]
+        if payload.get("chapter"):
+            hit_item["chapter"] = payload["chapter"]
+        if payload.get("category"):
+            hit_item["category"] = payload["category"]
+        if payload.get("competition"):
+            hit_item["competition"] = payload["competition"]
         hits.append(hit_item)
 
     hits.sort(key=lambda x: x["score"], reverse=True)
     return hits
 
 
-def search(
+def search_with_metadata(
     query: str,
     limit: int = 7,
     min_score: float = 0.0,
     collections: list[str] | None = None,
     category: str | None = None,
     confidence: list[str] | None = None,
-    min_per_collection: int = 1,
-) -> list[dict]:
-    """Encode query with BGE-M3 and search Qdrant for similar chunks.
+    min_per_collection: int = 0,
+) -> tuple[list[dict], dict[str, Any]]:
+    """Search a broad candidate pool and return results plus failure metadata.
 
-    *collections* is a list of short keys (``"qna"``, ``"rules"``, ``"kb"``).
-    When ``None`` or empty, all collections are searched.
-    *category* filters qna results by category (e.g. ``"Formula"``, ``"Baja"``, ``"EV"``).
-    *confidence* filters kb results by confidence level (``"합의됨"`` …).
-    *min_per_collection* guarantees at least N results from each collection
-    (if available), preventing one collection from dominating all results.
-
-    The default *limit* is 7 rather than 5 because one slot per collection is
-    reserved by *min_per_collection*; with three collections a limit of 5 would
-    leave only two slots to be filled by score.
+    ``min_per_collection`` remains in the public signature for older callers,
+    but is intentionally not enforced.  A low-relevance collection no longer
+    receives a guaranteed context slot.
     """
+    del min_per_collection
     if not collections:
         collections = list(COLLECTIONS.keys())
-    collection_names = [COLLECTIONS[k] for k in collections if k in COLLECTIONS]
+    valid_keys = [key for key in collections if key in COLLECTIONS]
+    collection_names = [COLLECTIONS[key] for key in valid_keys]
+    metadata: dict[str, Any] = {
+        "status": "ok",
+        "requested_collections": valid_keys,
+        "failed_collections": {},
+    }
+    if not collection_names:
+        metadata["status"] = "failed"
+        metadata["failed_collections"] = {"request": "no valid collection selected"}
+        return [], metadata
 
-    # Check cache
+    candidate_limit = max(limit * 4, 24)
     cache_key = hashlib.sha256(
-        f"{query}|{limit}|{min_score}|{','.join(sorted(collections))}"
+        f"{query}|{candidate_limit}|{min_score}|{','.join(sorted(valid_keys))}"
         f"|{category}|{','.join(sorted(confidence or []))}".encode()
     ).hexdigest()
     now = time.monotonic()
     cached = _search_cache.get(cache_key)
     if cached and (now - cached[0]) < _CACHE_TTL:
-        return cached[1]
+        return cached[1][:candidate_limit], dict(cached[2])
 
-    vector = _model.encode(query).tolist()
+    try:
+        vector = _model.encode(query).tolist()
+    except Exception as exc:
+        metadata["status"] = "failed"
+        metadata["failed_collections"] = {"embedding": str(exc)[:500]}
+        logger.exception("Query embedding failed")
+        return [], metadata
 
-    # Per-collection payload filters (qna: category, kb: confidence)
     category_filter = None
     if category:
         category_filter = models.Filter(
@@ -487,13 +635,8 @@ def search(
     confidence_filter = None
     levels = [c for c in (confidence or []) if c in CONFIDENCE_LEVELS]
     if levels and len(levels) < len(CONFIDENCE_LEVELS):
-        # 표·단편 청크는 신뢰도가 비어 있다(항목이 아니라 정리표라 등급이 없다).
-        # OR 조건으로 남겨두지 않으면 필터를 켜는 순간 표가 통째로 사라진다.
         confidence_filter = models.Filter(
-            should=[
-                models.FieldCondition(key="confidence", match=models.MatchAny(any=levels)),
-                models.FieldCondition(key="confidence", match=models.MatchValue(value="")),
-            ]
+            must=[models.FieldCondition(key="confidence", match=models.MatchAny(any=levels))]
         )
 
     collection_filters = {
@@ -501,36 +644,39 @@ def search(
         COLLECTIONS.get("kb"): confidence_filter,
     }
 
-    # Parallel search across collections
     per_collection: dict[str, list[dict]] = {}
+    failures: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=len(collection_names)) as executor:
-        futures = {}
-        for col_name in collection_names:
-            qf = collection_filters.get(col_name)
-            future = executor.submit(_search_collection, vector, col_name, limit, min_score, qf, query)
-            futures[future] = col_name
-
+        futures = {
+            executor.submit(
+                _search_collection,
+                vector,
+                col_name,
+                candidate_limit,
+                min_score,
+                collection_filters.get(col_name),
+                query,
+                None,
+                failures,
+            ): col_name
+            for col_name in collection_names
+        }
         for future in as_completed(futures):
             col_name = futures[future]
-            per_collection[col_name] = future.result()
+            try:
+                per_collection[col_name] = future.result()
+            except Exception as exc:
+                failures[col_name] = str(exc)[:500]
+                per_collection[col_name] = []
 
-    # Guarantee min_per_collection from each, fill remainder by score
-    guaranteed: list[dict] = []
-    remainder: list[dict] = []
-    for col_name, hits in per_collection.items():
-        guaranteed.extend(hits[:min_per_collection])
-        remainder.extend(hits[min_per_collection:])
+    output = [item for hits in per_collection.values() for item in hits]
+    output.sort(key=lambda item: item["score"], reverse=True)
 
-    remainder.sort(key=lambda x: x["score"], reverse=True)
-    remaining_slots = max(0, limit - len(guaranteed))
-    output = guaranteed + remainder[:remaining_slots]
-    output.sort(key=lambda x: x["score"], reverse=True)
-
-    # Deduplicate: up to MAX_CHUNKS_PER_POST per post, and — for sources where a
-    # post is a single small item (kb) — up to MAX_CHUNKS_PER_SECTION per section,
-    # so one subsection cannot fill every slot with near-identical topics.
+    # Deduplicate over the complete candidate pool, then backfill until the
+    # reranker pool is full.  This avoids returning fewer documents merely
+    # because the first few candidates were duplicates.
     seen_posts: dict[object, int] = {}
-    seen_sections: dict[str, int] = {}
+    seen_sections: dict[tuple[str, str, str], int] = {}
     deduped: list[dict] = []
     for item in output:
         pid = item.get("post_id")
@@ -539,24 +685,71 @@ def search(
             if count >= MAX_CHUNKS_PER_POST:
                 continue
             seen_posts[pid] = count + 1
-        section = item.get("section")
-        if section:
-            scount = seen_sections.get(section, 0)
-            if scount >= MAX_CHUNKS_PER_SECTION:
+        stable_section = (
+            item.get("source_key", ""),
+            item.get("chapter", ""),
+            item.get("section", ""),
+        )
+        if any(stable_section):
+            count = seen_sections.get(stable_section, 0)
+            if count >= MAX_CHUNKS_PER_SECTION:
                 continue
-            seen_sections[section] = scount + 1
+            seen_sections[stable_section] = count + 1
         deduped.append(item)
+        if len(deduped) >= candidate_limit:
+            break
 
-    # Update cache (evict oldest if full)
-    if len(_search_cache) >= _CACHE_MAX:
-        oldest_key = min(_search_cache, key=lambda k: _search_cache[k][0])
-        del _search_cache[oldest_key]
-    _search_cache[cache_key] = (now, deduped)
+    metadata["failed_collections"] = {
+        next((key for key, name in COLLECTIONS.items() if name == collection), collection): error
+        for collection, error in failures.items()
+    }
+    if failures:
+        metadata["status"] = "failed" if not output and len(failures) == len(collection_names) else "partial"
+    metadata["candidate_count"] = len(deduped)
 
-    return deduped
+    if metadata["status"] == "ok":
+        if len(_search_cache) >= _CACHE_MAX:
+            oldest_key = min(_search_cache, key=lambda key: _search_cache[key][0])
+            del _search_cache[oldest_key]
+        _search_cache[cache_key] = (now, deduped, metadata)
+    return deduped, metadata
 
 
-def _build_prompt(query: str, sources: list[dict], search_query: str | None = None) -> str:
+def search(
+    query: str,
+    limit: int = 7,
+    min_score: float = 0.0,
+    collections: list[str] | None = None,
+    category: str | None = None,
+    confidence: list[str] | None = None,
+    min_per_collection: int = 0,
+) -> list[dict]:
+    """Backward-compatible search API used by MCP and local tooling."""
+    hits, _ = search_with_metadata(
+        query, limit, min_score, collections, category, confidence, min_per_collection
+    )
+    return hits[:limit]
+
+
+def _question_needs_clarification(query: str) -> bool:
+    normalized = re.sub(r"\s+", " ", query.strip())
+    if len(normalized) < 4:
+        return True
+    return bool(
+        re.fullmatch(
+            r"(이거|저거|그거|이것|저것|그것)?\s*(어때|뭐야|가능해|알려줘|설명해줘)[?？ ]*",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _build_prompt(
+    query: str,
+    sources: list[dict],
+    search_query: str | None = None,
+    retrieval_status: str = "ok",
+) -> str:
     """Build the user prompt with search context."""
     if sources:
         context_parts = []
@@ -569,12 +762,40 @@ def _build_prompt(query: str, sources: list[dict], search_query: str | None = No
         context = "\n\n---\n\n".join(context_parts)
         prompt = f"다음은 검색된 참고 문서입니다:\n\n{context}\n\n---\n\n"
     else:
-        prompt = "검색된 참고 문서가 없습니다. 일반 지식으로 답변 가능하면 답변해주세요.\n\n"
+        prompt = "질문에 직접 관련된 참고 문서를 찾지 못했습니다. 문서 근거가 필요한 허용 여부·검차 판단은 단정하지 마세요.\n\n"
 
     if search_query and search_query != query:
         prompt += f"(검색에 사용된 쿼리: {search_query})\n"
+    prompt += f"(검색 상태: {retrieval_status})\n"
+    if _question_needs_clarification(query):
+        prompt += "(질문이 불완전합니다. 추측해서 길게 답하지 말고 가장 중요한 확인 질문 하나만 하세요.)\n"
     prompt += f"사용자 질문: {query}"
     return prompt
+
+
+_FOLLOWUP_PATTERN = re.compile(
+    r"(^|\s)(그|이|저)(것|거|규정|부분|경우)|"
+    r"^(아니|아니요|그게 아니라|정정|다시)|"
+    r"(위에서|방금|앞에서|내가 말한|아까)",
+    re.IGNORECASE,
+)
+
+
+def _should_rewrite_query(query: str, history: list[dict] | None) -> bool:
+    if not history:
+        return False
+    normalized = query.strip()
+    return bool(_FOLLOWUP_PATTERN.search(normalized) or len(normalized) < 18)
+
+
+def _preserves_query_identifiers(original: str, rewritten: str) -> bool:
+    identifiers = set(re.findall(r"\b(?=[A-Za-z0-9-]*[A-Za-z])(?=[A-Za-z0-9-]*[0-9A-Z])[A-Za-z0-9-]{2,}\b", original))
+    competition_terms = re.findall(
+        r"스마트\s*e\s*모빌리티|e[- ]?formula|e[- ]?포뮬러|포뮬러|formula|바하|baja|전기차|\bev\b",
+        original,
+        re.IGNORECASE,
+    )
+    return all(token.lower() in rewritten.lower() for token in identifiers | set(competition_terms))
 
 
 async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
@@ -582,7 +803,7 @@ async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
 
     Returns the rewritten query, or None if rewriting was skipped or failed.
     """
-    if not history:
+    if not _should_rewrite_query(query, history):
         return None
 
     # Build condensed history (last 6 messages, assistant truncated to 500 chars)
@@ -621,7 +842,7 @@ async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
         response = await loop.run_in_executor(
             None,
             lambda: _gemini.models.generate_content(
-                model="gemini-3-flash-preview",
+                model=MODEL_CONFIG[FALLBACK_MODEL_KEY]["model_id"],
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.0,
@@ -632,7 +853,7 @@ async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
         )
         rewritten = response.text.strip()
         logger.warning("Query rewrite: '%s' -> '%s'", query, rewritten)
-        if rewritten and rewritten != query:
+        if rewritten and rewritten != query and _preserves_query_identifiers(query, rewritten):
             return rewritten
         return None
     except Exception as e:
@@ -661,32 +882,63 @@ def _compress_history(history: list[dict]) -> list[dict]:
     return compressed
 
 
-def _classify_error(e: Exception, provider: str) -> str:
-    """Return a user-friendly error message based on the exception type."""
+def _error_details(e: Exception, provider: str) -> dict[str, Any]:
+    """Return a persistable, user-safe provider error."""
     msg = str(e).lower()
-
+    code = "provider_error"
+    retryable = True
     if "503" in msg or "unavailable" in msg or "overloaded" in msg:
-        return f"{provider} 서버가 일시적으로 과부하 상태입니다. 잠시 후 다시 시도해주세요."
-    if "429" in msg or "rate" in msg or "quota" in msg or "resource_exhausted" in msg:
-        return f"{provider} API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요."
-    if "401" in msg or "403" in msg or "permission" in msg or "authentication" in msg:
-        return f"{provider} API 인증에 실패했습니다. 관리자에게 문의해주세요."
-    if "timeout" in msg:
-        return f"{provider} 서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
-    if "400" in msg or "invalid" in msg:
-        return f"{provider} 요청 처리 중 오류가 발생했습니다. 질문을 수정하여 다시 시도해주세요."
+        code = "unavailable"
+        user_message = f"{provider} 서버가 일시적으로 과부하 상태입니다. 잠시 후 다시 시도해주세요."
+    elif "429" in msg or "rate" in msg or "quota" in msg or "resource_exhausted" in msg:
+        code = "rate_limited"
+        user_message = f"{provider} API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요."
+    elif "401" in msg or "403" in msg or "permission" in msg or "authentication" in msg:
+        code = "authentication"
+        retryable = False
+        user_message = f"{provider} API 인증에 실패했습니다. 관리자에게 문의해주세요."
+    elif "404" in msg or "not found" in msg or "no longer available" in msg:
+        code = "model_not_found"
+        retryable = False
+        user_message = f"{provider} 모델을 사용할 수 없어 대체 모델을 확인하고 있습니다."
+    elif "timeout" in msg or "deadline" in msg:
+        code = "timeout"
+        user_message = f"{provider} 서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
+    elif "400" in msg or "invalid" in msg:
+        code = "invalid_request"
+        retryable = False
+        user_message = f"{provider} 요청 처리 중 오류가 발생했습니다. 질문을 수정하여 다시 시도해주세요."
+    else:
+        user_message = f"{provider} 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
 
-    return f"{provider} 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+    return {
+        "provider": provider.lower(),
+        "code": code,
+        "message": str(e)[:1000],
+        "user_message": user_message,
+        "retryable": retryable,
+    }
+
+
+def _classify_error(e: Exception, provider: str) -> str:
+    """Backward-compatible user-facing error classifier."""
+    return _error_details(e, provider)["user_message"]
 
 
 async def _stream_gemini(
     contents: list,
-    model_config: dict,
+    model_key: str,
+    fallback_from: str | None = None,
 ) -> AsyncIterator[str]:
-    """Stream from Gemini and yield SSE events (token / usage)."""
+    """Stream Gemini with structured model, error, and usage metadata."""
+    model_config = MODEL_CONFIG[model_key]
     input_tokens = 0
     output_tokens = 0
     thinking_tokens = 0
+    resolved_model = model_config["model_id"]
+    finish_reason = None
+    emitted_model = False
+    emitted_text = False
 
     try:
         config_kwargs: dict = {
@@ -711,8 +963,20 @@ async def _stream_gemini(
             chunk = await loop.run_in_executor(None, next, it, _STREAM_DONE)
             if chunk is _STREAM_DONE:
                 break
-            if chunk.text:
-                data = json.dumps(chunk.text, ensure_ascii=False)
+            resolved_model = getattr(chunk, "model_version", None) or resolved_model
+            if not emitted_model:
+                model_data = {
+                    "requested_model": fallback_from or model_key,
+                    "resolved_model": model_key,
+                    "resolved_model_id": resolved_model,
+                    "fallback_from": fallback_from,
+                }
+                yield f"event: model\ndata: {json.dumps(model_data, ensure_ascii=False)}\n\n"
+                emitted_model = True
+            chunk_text = _gemini_text(chunk)
+            if chunk_text:
+                emitted_text = True
+                data = json.dumps(chunk_text, ensure_ascii=False)
                 yield f"event: token\ndata: {data}\n\n"
             if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
                 um = chunk.usage_metadata
@@ -722,16 +986,34 @@ async def _stream_gemini(
                     output_tokens = um.candidates_token_count
                 if hasattr(um, "thoughts_token_count") and um.thoughts_token_count is not None:
                     thinking_tokens = um.thoughts_token_count
+            candidates = getattr(chunk, "candidates", None) or []
+            if candidates:
+                reason = getattr(candidates[0], "finish_reason", None)
+                if reason is not None:
+                    finish_reason = getattr(reason, "name", None) or str(reason)
+        if not emitted_text:
+            raise RuntimeError("model returned no visible text")
+        _set_model_health(model_key, True, resolved_model=resolved_model)
     except Exception as e:
         logger.exception("Gemini streaming error: %s", e)
-        error_msg = json.dumps(_classify_error(e, "Gemini"), ensure_ascii=False)
-        yield f"event: error\ndata: {error_msg}\n\n"
+        _set_model_health(model_key, False, error=str(e)[:500])
+        error_data = json.dumps(_error_details(e, "Gemini"), ensure_ascii=False)
+        yield f"event: error\ndata: {error_data}\n\n"
+        return
 
-    usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens, "thinking_tokens": thinking_tokens})
+    usage_data = json.dumps({
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "thinking_tokens": thinking_tokens,
+        "resolved_model": model_key,
+        "resolved_model_id": resolved_model,
+        "finish_reason": finish_reason,
+    })
     yield f"event: usage\ndata: {usage_data}\n\n"
 
 
 async def _stream_anthropic(
+    model_key: str,
     model_config: dict,
     query: str,
     sources: list[dict],
@@ -750,8 +1032,17 @@ async def _stream_anthropic(
     input_tokens = 0
     output_tokens = 0
     thinking_tokens = 0
+    finish_reason = None
+    emitted_text = False
 
     try:
+        model_data = {
+            "requested_model": model_key,
+            "resolved_model": model_key,
+            "resolved_model_id": model_config["model_id"],
+            "fallback_from": None,
+        }
+        yield f"event: model\ndata: {json.dumps(model_data, ensure_ascii=False)}\n\n"
         kwargs: dict = {
             "model": model_config["model_id"],
             "max_tokens": 128000,
@@ -769,54 +1060,101 @@ async def _stream_anthropic(
             async for event in stream:
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
-                        data = json.dumps(event.delta.text, ensure_ascii=False)
-                        yield f"event: token\ndata: {data}\n\n"
+                        text = event.delta.text
+                        if text:
+                            emitted_text = True
+                            data = json.dumps(text, ensure_ascii=False)
+                            yield f"event: token\ndata: {data}\n\n"
 
             # Get final message for usage
             response = await stream.get_final_message()
             input_tokens = response.usage.input_tokens
             output_tokens = response.usage.output_tokens
+            finish_reason = getattr(response, "stop_reason", None)
 
             # Thinking tokens are included in output_tokens for billing,
             # but may be available separately via usage metadata
             if hasattr(response.usage, "thinking_tokens"):
                 thinking_tokens = response.usage.thinking_tokens
+            if not emitted_text:
+                raise RuntimeError("model returned no visible text")
 
     except Exception as e:
         logger.exception("Anthropic streaming error: %s", e)
-        error_msg = json.dumps(_classify_error(e, "Claude"), ensure_ascii=False)
-        yield f"event: error\ndata: {error_msg}\n\n"
+        error_data = json.dumps(_error_details(e, "Claude"), ensure_ascii=False)
+        yield f"event: error\ndata: {error_data}\n\n"
+        return
 
-    usage_data = json.dumps({"input_tokens": input_tokens, "output_tokens": output_tokens, "thinking_tokens": thinking_tokens})
+    usage_data = json.dumps({
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "thinking_tokens": thinking_tokens,
+        "resolved_model": model_key,
+        "resolved_model_id": model_config["model_id"],
+        "finish_reason": finish_reason,
+    })
     yield f"event: usage\ndata: {usage_data}\n\n"
 
 
-_CATEGORY_PATTERNS = {
-    "Formula": re.compile(r"포뮬러|formula|포뮬라", re.IGNORECASE),
-    "Baja": re.compile(r"바하|baja", re.IGNORECASE),
-    "EV": re.compile(r"\bev\b|전기|electric", re.IGNORECASE),
+_COMPETITION_PATTERNS = (
+    ("smart_e_mobility", re.compile(r"스마트\s*e\s*모빌리티|스마트.{0,5}모빌리티", re.IGNORECASE)),
+    ("e_formula", re.compile(r"e[- ]?formula|e[- ]?포뮬러|전기\s*포뮬러", re.IGNORECASE)),
+    ("formula", re.compile(r"포뮬러|formula|포뮬라", re.IGNORECASE)),
+    ("baja", re.compile(r"바하|baja", re.IGNORECASE)),
+    ("ev", re.compile(r"\bev\b|전기차|electric\s+vehicle", re.IGNORECASE)),
+)
+
+_COMPETITION_CATEGORY = {
+    "smart_e_mobility": "EV",
+    "e_formula": "Formula",
+    "formula": "Formula",
+    "baja": "Baja",
+    "ev": "EV",
 }
+
+
+def _detect_competition(query: str) -> str | None:
+    for competition, pattern in _COMPETITION_PATTERNS:
+        if pattern.search(query):
+            return competition
+    return None
 
 
 def _detect_category(query: str) -> str | None:
     """Detect competition category from query keywords."""
-    for category, pattern in _CATEGORY_PATTERNS.items():
-        if pattern.search(query):
-            return category
-    return None
+    competition = _detect_competition(query)
+    return _COMPETITION_CATEGORY.get(competition)
 
 
-async def _rerank_results(query: str, sources: list[dict]) -> list[dict]:
+def _source_matches_competition(source: dict, competition: str | None) -> bool:
+    """Reject only documents that explicitly name a different competition."""
+    if not competition:
+        return True
+    text = f"{source.get('source', '')}\n{source.get('content', '')[:1200]}"
+    source_competition = source.get("competition") or _detect_competition(text)
+    return source_competition is None or source_competition == competition
+
+
+def _rerank_excerpt(source: dict) -> str:
+    content = source.get("content", "")
+    if "[답변]" in content:
+        question, answer = content.split("[답변]", 1)
+        return f"{question[:300]}\n[답변]{answer[:900]}"
+    return content[:1000]
+
+
+async def _rerank_results(query: str, sources: list[dict], limit: int = 7) -> list[dict]:
     """Re-rank search results using LLM-based relevance scoring."""
     if not sources or len(sources) <= 1:
-        return sources
+        return sources[:limit]
 
     docs = []
     for i, s in enumerate(sources):
-        docs.append(f"[{i}] {s['source']}\n{s['content'][:300]}")
+        docs.append(f"[{i}] {s['source']}\n{_rerank_excerpt(s)}")
     docs_text = "\n\n".join(docs)
 
-    prompt = f"""다음 검색 결과들의 질문에 대한 관련성을 0-10 점수로 평가하세요.
+    prompt = f"""다음 검색 결과가 사용자의 질문에 직접 답하는 정도를 0-10점으로 평가하세요.
+문서 종류나 명목상 권위는 점수에 반영하지 마세요. 단어만 겹치고 종목·부품·조건이 다르면 낮게 평가하세요.
 JSON 배열로만 응답하세요: [{{"index": 0, "score": 8}}, ...]
 
 질문: {query}
@@ -829,11 +1167,12 @@ JSON 배열로만 응답하세요: [{{"index": 0, "score": 8}}, ...]
         response = await loop.run_in_executor(
             None,
             lambda: _gemini.models.generate_content(
-                model="gemini-3-flash-preview",
+                model=MODEL_CONFIG[FALLBACK_MODEL_KEY]["model_id"],
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.0,
-                    max_output_tokens=200,
+                    max_output_tokens=700,
+                    response_mime_type="application/json",
                     thinking_config=types.ThinkingConfig(thinking_level="minimal"),
                 ),
             ),
@@ -842,24 +1181,32 @@ JSON 배열로만 응답하세요: [{{"index": 0, "score": 8}}, ...]
         # Extract JSON array from response
         match = re.search(r'\[.*\]', text, re.DOTALL)
         if not match:
-            return sources
+            return sources[:limit]
         scores = json.loads(match.group())
-        score_map = {item["index"]: item["score"] for item in scores}
+        score_map = {
+            int(item["index"]): float(item["score"])
+            for item in scores
+            if isinstance(item, dict)
+            and isinstance(item.get("index"), int)
+            and 0 <= item["index"] < len(sources)
+            and isinstance(item.get("score"), (int, float))
+        }
+        if not score_map:
+            return sources[:limit]
 
         # Filter low-relevance results and re-sort
         reranked = []
         for i, s in enumerate(sources):
-            relevance = score_map.get(i, 5)
+            relevance = score_map.get(i, 0)
             if relevance >= 3:
-                s["_relevance"] = relevance
-                reranked.append(s)
-        reranked.sort(key=lambda x: x.get("_relevance", 0), reverse=True)
-        for s in reranked:
-            s.pop("_relevance", None)
-        return reranked if reranked else sources
+                item = dict(s)
+                item["rerank_score"] = relevance
+                reranked.append(item)
+        reranked.sort(key=lambda x: (x.get("rerank_score", 0), x.get("score", 0)), reverse=True)
+        return reranked[:limit]
     except Exception as e:
         logger.warning("Re-ranking failed, using original results: %s", e)
-        return sources
+        return sources[:limit]
 
 
 async def search_and_stream(
@@ -869,6 +1216,7 @@ async def search_and_stream(
     history: list[dict] | None = None,
     collections: list[str] | None = None,
     category: str | None = None,
+    competition: str | None = None,
     confidence: list[str] | None = None,
     model: str = "gemini-3-flash",
 ) -> AsyncIterator[str]:
@@ -893,18 +1241,82 @@ async def search_and_stream(
         search_query = rewritten
         yield f"event: rewrite\ndata: {json.dumps(rewritten, ensure_ascii=False)}\n\n"
 
-    # Auto-detect category if not explicitly specified
+    # Auto-detect the exact competition first; generic "전기" no longer
+    # routes unrelated electrical questions into EV.
+    competition = competition or _detect_competition(search_query) or _detect_competition(query)
     if not category:
-        category = _detect_category(search_query) or _detect_category(query)
+        category = _COMPETITION_CATEGORY.get(competition)
 
-    # Step 2: Search with (possibly rewritten) query
-    sources = search(search_query, limit, min_score, collections, category, confidence)
+    # Step 2: Search with (possibly rewritten) query without blocking the event loop.
+    retrieval_started = time.monotonic()
+    loop = asyncio.get_running_loop()
+    sources, retrieval_meta = await loop.run_in_executor(
+        None,
+        lambda: search_with_metadata(
+            search_query, limit, min_score, collections, category, confidence
+        ),
+    )
+
+    # A rewrite can overfit a previous bad answer.  Preserve candidates found
+    # directly from the user's correction as a second retrieval path.
+    if rewritten:
+        original_sources, original_meta = await loop.run_in_executor(
+            None,
+            lambda: search_with_metadata(
+                query, limit, min_score, collections, category, confidence
+            ),
+        )
+        merged: dict[tuple[str, str], dict] = {}
+        for source in sources + original_sources:
+            key = (source.get("source_key", ""), source.get("content", ""))
+            previous = merged.get(key)
+            if previous is None or source.get("score", 0) > previous.get("score", 0):
+                merged[key] = source
+        sources = sorted(merged.values(), key=lambda item: item.get("score", 0), reverse=True)
+        combined_failures = {
+            **retrieval_meta.get("failed_collections", {}),
+            **{f"original:{key}": value for key, value in original_meta.get("failed_collections", {}).items()},
+        }
+        retrieval_meta["failed_collections"] = combined_failures
+        statuses = {retrieval_meta.get("status"), original_meta.get("status")}
+        if "ok" in statuses and len(statuses) > 1:
+            retrieval_meta["status"] = "partial"
+        elif statuses == {"failed"}:
+            retrieval_meta["status"] = "failed"
+
+    if competition:
+        sources = [source for source in sources if _source_matches_competition(source, competition)]
 
     # Re-rank results for relevance
-    sources = await _rerank_results(search_query, sources)
+    retrieval_ms = round((time.monotonic() - retrieval_started) * 1000)
+    rerank_started = time.monotonic()
+    sources = await _rerank_results(query, sources, limit)
+    rerank_ms = round((time.monotonic() - rerank_started) * 1000)
+
+    retrieval_event = {
+        **retrieval_meta,
+        "competition": competition,
+        "category": category,
+        "retrieval_ms": retrieval_ms,
+        "rerank_ms": rerank_ms,
+        "result_count": len(sources),
+    }
+    yield f"event: retrieval\ndata: {json.dumps(retrieval_event, ensure_ascii=False)}\n\n"
 
     # Yield sources event
     yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
+
+    if retrieval_meta.get("status") == "failed":
+        error = {
+            "provider": "retrieval",
+            "code": "retrieval_failed",
+            "message": json.dumps(retrieval_meta.get("failed_collections", {}), ensure_ascii=False)[:1000],
+            "user_message": "참고 문서 검색에 실패해 근거 있는 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요.",
+            "retryable": True,
+        }
+        yield f"event: error\ndata: {json.dumps(error, ensure_ascii=False)}\n\n"
+        yield "event: done\ndata: {}\n\n"
+        return
 
     # Compress history for LLM context
     compressed = _compress_history(history) if history else history
@@ -912,24 +1324,86 @@ async def search_and_stream(
     # Step 3: Stream from the selected provider
     if model_config["provider"] == "gemini":
         # Build Gemini contents
-        user_prompt = _build_prompt(query, sources, search_query if rewritten else None)
+        user_prompt = _build_prompt(
+            query,
+            sources,
+            search_query if rewritten else None,
+            retrieval_meta.get("status", "ok"),
+        )
         contents = []
         for msg in compressed or []:
             role = "model" if msg["role"] == "assistant" else "user"
             contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
         contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
 
-        async for event in _stream_gemini(contents, model_config):
+        emitted_text = False
+        should_fallback = False
+        async for event in _stream_gemini(contents, model):
+            if event.startswith("event: token"):
+                emitted_text = True
+            if event.startswith("event: error") and not emitted_text:
+                should_fallback = (
+                    model != FALLBACK_MODEL_KEY and is_model_available(FALLBACK_MODEL_KEY)
+                )
+                if should_fallback:
+                    try:
+                        reason = json.loads(event.split("data: ", 1)[1])
+                    except Exception:
+                        reason = {"provider": "gemini", "code": "provider_error"}
+                    fallback_event = {
+                        "from": model,
+                        "to": FALLBACK_MODEL_KEY,
+                        "reason": reason,
+                    }
+                    yield f"event: fallback\ndata: {json.dumps(fallback_event, ensure_ascii=False)}\n\n"
+                    break
             yield event
+
+        if should_fallback:
+            logger.warning("Falling back from %s to %s", model, FALLBACK_MODEL_KEY)
+            async for event in _stream_gemini(contents, FALLBACK_MODEL_KEY, fallback_from=model):
+                yield event
 
     elif model_config["provider"] == "anthropic":
         if _anthropic is None:
-            error_msg = json.dumps("Anthropic API 키가 설정되지 않았습니다. Claude 모델을 사용할 수 없습니다.", ensure_ascii=False)
-            yield f"event: error\ndata: {error_msg}\n\n"
-            usage_data = json.dumps({"input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0})
-            yield f"event: usage\ndata: {usage_data}\n\n"
+            error_data = {
+                "provider": "anthropic",
+                "code": "authentication",
+                "message": "Anthropic client unavailable",
+                "user_message": "Claude 모델을 사용할 수 없습니다. 관리자에게 문의해주세요.",
+                "retryable": False,
+            }
+            yield f"event: error\ndata: {json.dumps(error_data, ensure_ascii=False)}\n\n"
         else:
-            async for event in _stream_anthropic(model_config, query, sources, compressed, search_query if rewritten else None):
+            emitted_text = False
+            should_fallback = False
+            async for event in _stream_anthropic(model, model_config, query, sources, compressed, search_query if rewritten else None):
+                if event.startswith("event: token"):
+                    emitted_text = True
+                if event.startswith("event: error") and not emitted_text and is_model_available(FALLBACK_MODEL_KEY):
+                    should_fallback = True
+                    try:
+                        reason = json.loads(event.split("data: ", 1)[1])
+                    except Exception:
+                        reason = {"provider": "anthropic", "code": "provider_error"}
+                    fallback_event = {"from": model, "to": FALLBACK_MODEL_KEY, "reason": reason}
+                    yield f"event: fallback\ndata: {json.dumps(fallback_event, ensure_ascii=False)}\n\n"
+                    break
                 yield event
+
+            if should_fallback:
+                user_prompt = _build_prompt(
+                    query,
+                    sources,
+                    search_query if rewritten else None,
+                    retrieval_meta.get("status", "ok"),
+                )
+                contents = []
+                for msg in compressed or []:
+                    role = "model" if msg["role"] == "assistant" else "user"
+                    contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
+                contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
+                async for event in _stream_gemini(contents, FALLBACK_MODEL_KEY, fallback_from=model):
+                    yield event
 
     yield "event: done\ndata: {}\n\n"

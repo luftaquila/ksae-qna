@@ -620,6 +620,16 @@ header h1 {
 .msg.assistant .answer h2,
 .msg.assistant .answer h3 { margin: 0.8em 0 0.4em; }
 
+.answer-notice {
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
 /* ==========================================================================
    Sources
    ========================================================================== */

@@ -33,7 +33,7 @@ DEFAULT_COLLECTION = "ksae_qna"
 # Payload fields carried from a chunk in addition to the always-present
 # id / content / chunk_index. Q&A chunks use the default; other sources
 # (e.g. the AARK knowledge base) pass their own field list.
-QNA_PAYLOAD_FIELDS = ("category", "title", "author", "date", "url")
+QNA_PAYLOAD_FIELDS = ("category", "title", "author", "date", "url", "has_answer")
 
 
 def build_client(qdrant_url: str, api_key: str | None = None, timeout: int = 60) -> QdrantClient:
