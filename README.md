@@ -6,7 +6,7 @@ KSAE(한국자동차공학회) 대학생 자작자동차대회 Q&A 게시판을 
 
 - **Q&A 게시판 크롤링** — KSAE 자작자동차대회 Q&A 게시판의 질문/답변을 자동 수집
 - **벡터 검색 기반 답변** — BGE-M3 임베딩 + Qdrant 벡터 DB로 질문과 관련된 기존 Q&A, 규정집, AARK 지식베이스 검색
-- **멀티 모델 지원** — Gemini Pro의 공급자 관리 `latest` 별칭, 시작 canary, Flash 자동 폴백 지원
+- **멀티 모델 지원** — Gemini Pro의 공급자 관리 `latest` 별칭과 Flash 자동 폴백 지원
 - **실시간 스트리밍** — SSE 기반 토큰 단위 스트리밍 응답
 - **Google OAuth 인증** — 사용자 인증 및 크레딧 기반 사용량 관리
 - **관리자 페이지** — 사용자 관리, 대화 기록 열람, 모델별 토큰 사용량/비용 확인
@@ -59,7 +59,6 @@ python server.py
 | `JWT_SECRET` | | JWT 서명 키 (미설정 시 자동 생성) |
 | `ADMIN_EMAILS` | | 관리자 이메일 (쉼표 구분) |
 | `HTTPS_ONLY` | | `true` 설정 시 Secure 쿠키 활성화 |
-| `MODEL_CANARY_ENABLED` | | Gemini 스트리밍 canary 활성화(기본 `true`) |
 | `APP_VERSION` | | `/api/health`에 표시할 빌드 식별자 |
 
 `/live`는 프로세스 생존 여부, `/ready`는 SQLite·Qdrant·모델 가용성을 확인합니다. `/api/health`에서는 모델이 실제로 해결된 버전과 프롬프트 버전도 확인할 수 있습니다.

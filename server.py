@@ -9,7 +9,7 @@ import os
 import secrets
 import time
 import uuid
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,6 @@ from src.chat import (
     init_model_settings,
     init_resources,
     is_model_available,
-    run_model_canaries,
     search_and_stream,
     set_model_admin_settings,
     set_model_display_order,
@@ -110,20 +109,7 @@ async def lifespan(app: FastAPI):
     init_site_settings()
     init_resources()
     init_model_settings()
-    run_model_canaries()
-
-    async def refresh_model_health():
-        while True:
-            await asyncio.sleep(900)
-            await asyncio.to_thread(run_model_canaries)
-
-    canary_task = asyncio.create_task(refresh_model_health())
-    try:
-        yield
-    finally:
-        canary_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await canary_task
+    yield
 
 
 app = FastAPI(lifespan=lifespan)
@@ -753,8 +739,6 @@ async def admin_toggle_model(model_key: str, body: ModelToggleRequest, request: 
     if model_key not in MODEL_CONFIG:
         return JSONResponse({"error": "존재하지 않는 모델입니다"}, status_code=404)
     set_model_admin_settings(model_key, body.enabled, body.credits)
-    if body.enabled:
-        await asyncio.to_thread(run_model_canaries, [model_key])
     return {"ok": True, "model_key": model_key, "enabled": body.enabled, "credits": get_effective_credits(model_key)}
 
 

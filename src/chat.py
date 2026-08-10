@@ -214,53 +214,6 @@ def _gemini_text(chunk: Any) -> str:
         return ""
 
 
-def run_model_canaries(model_keys: list[str] | None = None) -> None:
-    """Exercise the exact Gemini streaming path before advertising a model.
-
-    A retired alias used to appear healthy until the first paid user request.
-    The canary is deliberately tiny, and a failure only marks that model
-    unavailable; it does not prevent the service or the fallback model from
-    starting.
-    """
-    if os.environ.get("MODEL_CANARY_ENABLED", "true").lower() not in ("1", "true", "yes"):
-        logger.warning("Model startup canaries are disabled")
-        return
-
-    for model_key, cfg in MODEL_CONFIG.items():
-        if model_keys is not None and model_key not in model_keys:
-            continue
-        if cfg["provider"] != "gemini" or not _model_enabled.get(model_key, True):
-            continue
-        if _gemini is None:
-            _set_model_health(model_key, False, error="provider client unavailable")
-            continue
-        try:
-            stream = _gemini.models.generate_content_stream(
-                model=cfg["model_id"],
-                contents="OK라고만 답하세요.",
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    max_output_tokens=256,
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level=cfg.get("thinking_level") or "minimal"
-                    ),
-                ),
-            )
-            resolved_model = None
-            received = False
-            for chunk in stream:
-                resolved_model = getattr(chunk, "model_version", None) or resolved_model
-                if _gemini_text(chunk):
-                    received = True
-            if not received:
-                raise RuntimeError("canary returned no text")
-            _set_model_health(model_key, True, resolved_model=resolved_model or cfg["model_id"])
-            logger.info("Model canary passed: %s -> %s", model_key, resolved_model or cfg["model_id"])
-        except Exception as exc:
-            _set_model_health(model_key, False, error=str(exc)[:500])
-            logger.exception("Model canary failed: %s", model_key)
-
-
 def check_qdrant_health() -> bool:
     try:
         if _qdrant is None:
