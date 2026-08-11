@@ -16,6 +16,7 @@ def test_pro_uses_provider_maintained_latest_alias():
 def test_chat_routing_and_credit_cost_are_fixed():
     assert chat.PRIMARY_MODEL_KEY == "gemini-3-pro"
     assert chat.FALLBACK_MODEL_KEY == "gemini-3-flash"
+    assert chat.MODEL_CONFIG[chat.FALLBACK_MODEL_KEY]["model_id"] == "gemini-3.6-flash"
     assert chat.CHAT_CREDIT_COST == 1
     assert all(chat.get_effective_credits(key) == 1 for key in chat.ROUTING_MODEL_KEYS)
 
@@ -121,7 +122,7 @@ def test_pro_failure_before_first_token_falls_back_to_flash(monkeypatch):
         model = {
             "requested_model": fallback_from,
             "resolved_model": "gemini-3-flash",
-            "resolved_model_id": "gemini-3-flash-preview",
+            "resolved_model_id": "gemini-3.6-flash",
         }
         yield f"event: model\ndata: {json.dumps(model)}\n\n"
         yield 'event: token\ndata: "대체 응답"\n\n'

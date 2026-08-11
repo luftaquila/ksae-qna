@@ -82,11 +82,11 @@ MAX_CHUNKS_PER_POST = 2
 MODEL_CONFIG = {
     "gemini-3-flash": {
         "provider": "gemini",
-        "model_id": "gemini-3-flash-preview",
-        "label": "Gemini 3 Flash",
+        "model_id": "gemini-3.6-flash",
+        "label": "Gemini 3.6 Flash",
         "credits": 1,
         "thinking_level": "high",
-        "pricing": {"input": 0.50, "output": 3.00, "thinking": 3.00},
+        "pricing": {"input": 1.50, "output": 7.50, "thinking": 7.50},
     },
     "gemini-3-pro": {
         "provider": "gemini",
@@ -748,9 +748,8 @@ async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
                 model=MODEL_CONFIG[FALLBACK_MODEL_KEY]["model_id"],
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.0,
                     max_output_tokens=150,
-                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
                 ),
             ),
         )
@@ -846,7 +845,6 @@ async def _stream_gemini(
     try:
         config_kwargs: dict = {
             "system_instruction": SYSTEM_PROMPT,
-            "temperature": 0.3,
             "max_output_tokens": 4096,
         }
         if model_config["thinking_level"]:
@@ -1073,10 +1071,9 @@ JSON 배열로만 응답하세요: [{{"index": 0, "score": 8}}, ...]
                 model=MODEL_CONFIG[FALLBACK_MODEL_KEY]["model_id"],
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.0,
                     max_output_tokens=700,
                     response_mime_type="application/json",
-                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+                    thinking_config=types.ThinkingConfig(thinking_level="medium"),
                 ),
             ),
         )
