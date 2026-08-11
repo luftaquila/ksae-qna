@@ -843,11 +843,16 @@ header {
   display: flex;
   width: min(100%, 620px);
   min-height: 100%;
+  flex: 0 0 auto;
   align-self: center;
   justify-content: center;
   flex-direction: column;
   padding: 56px 0 96px;
   text-align: center;
+}
+
+.welcome > * {
+  flex-shrink: 0;
 }
 
 .welcome-logo {

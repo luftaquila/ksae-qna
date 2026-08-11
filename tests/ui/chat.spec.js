@@ -82,6 +82,40 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   await expect(page.locator("#send span")).toHaveText("전송");
 });
 
+for (const viewport of [
+  { width: 320, height: 568 },
+  { width: 375, height: 667 },
+  { width: 390, height: 844 },
+]) {
+  test(`mobile welcome notice is not clipped at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await installChatMocks(page);
+    await page.goto("/static/index.html");
+    await expect(page.locator(".welcome-warn")).toBeVisible();
+
+    const overflow = await page.locator(".welcome").evaluate((element) => ({
+      horizontal: element.scrollWidth - element.clientWidth,
+      vertical: element.scrollHeight - element.clientHeight,
+    }));
+    expect(overflow.horizontal).toBeLessThanOrEqual(1);
+    expect(overflow.vertical).toBeLessThanOrEqual(1);
+
+    await page.locator(".welcome-warn").scrollIntoViewIfNeeded();
+    const positions = await page.locator(".welcome-warn").evaluate((element) => {
+      const notice = element.getBoundingClientRect();
+      const chat = element.closest(".chat").getBoundingClientRect();
+      return {
+        noticeTop: notice.top,
+        noticeBottom: notice.bottom,
+        chatTop: chat.top,
+        chatBottom: chat.bottom,
+      };
+    });
+    expect(positions.noticeTop).toBeGreaterThanOrEqual(positions.chatTop - 1);
+    expect(positions.noticeBottom).toBeLessThanOrEqual(positions.chatBottom + 1);
+  });
+}
+
 test("collection chips keep their width when toggled", async ({ page }) => {
   await installChatMocks(page);
   await page.goto("/static/index.html");
