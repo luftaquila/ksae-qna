@@ -12,7 +12,6 @@ const sidebarOverlay = document.getElementById("sidebar-overlay");
 
 let currentUser = null;
 let currentSessionId = null;
-let availableModels = [];
 let lowCreditThreshold = 5;
 let unlimitedCredits = false;
 
@@ -356,8 +355,7 @@ form.addEventListener("submit", async (e) => {
     const collections = [...form.querySelectorAll('input[name="collections"]:checked')].map((el) => el.value);
     const categoryEl = document.getElementById("category-select");
     const category = categoryEl && !categoryEl.disabled ? (categoryEl.value || null) : null;
-    const model = document.getElementById("model-select").value;
-    const body = { query, collections, category, model };
+    const body = { query, collections, category };
     if (currentSessionId) body.session_id = currentSessionId;
 
     const res = await fetch("/api/chat", {
@@ -474,12 +472,7 @@ function handleEvent(type, data, sourcesContainer, answerEl, state) {
       }
     } catch (e) { console.warn("Failed to parse retrieval event:", e); }
   } else if (type === "fallback") {
-    try {
-      const fallback = JSON.parse(data);
-      const from = availableModels.find((m) => m.id === fallback.from)?.label || fallback.from;
-      const to = availableModels.find((m) => m.id === fallback.to)?.label || fallback.to;
-      addAnswerNotice(answerEl, `${from} 응답에 실패해 ${to}(으)로 자동 전환했습니다. 이용권 차액은 환불됩니다.`);
-    } catch (e) { console.warn("Failed to parse fallback event:", e); }
+    addAnswerNotice(answerEl, "기본 모델 응답에 실패해 대체 모델로 자동 전환했습니다.");
   } else if (type === "credits") {
     try {
       const credits = JSON.parse(data);
@@ -615,43 +608,6 @@ function formatLocal(utcStr) {
 }
 
 // ---------------------------------------------------------------------------
-// Models
-// ---------------------------------------------------------------------------
-async function loadModels() {
-  try {
-    const res = await fetch("/api/models");
-    const data = await res.json();
-    availableModels = data.models || [];
-  } catch {
-    availableModels = [];
-  }
-  renderModelSelect();
-}
-
-function renderModelSelect() {
-  const select = document.getElementById("model-select");
-  const saved = localStorage.getItem("selectedModel");
-  const prev = select.value || saved;
-  select.innerHTML = "";
-  for (const m of availableModels) {
-    const opt = document.createElement("option");
-    opt.value = m.id;
-    opt.textContent = `${m.label} (${m.credits})`;
-    if (!m.available) opt.disabled = true;
-    select.appendChild(opt);
-  }
-  // Restore previous selection if still available and enabled
-  if (prev && availableModels.some((m) => m.id === prev && m.available)) {
-    select.value = prev;
-  } else {
-    // Select first available model
-    const first = availableModels.find((m) => m.available);
-    if (first) select.value = first.id;
-  }
-  localStorage.setItem("selectedModel", select.value);
-}
-
-// ---------------------------------------------------------------------------
 // Collections (검색 소스) — /api/collections 로 칩·필터를 렌더한다.
 // 소스를 추가할 때 이 파일을 고칠 필요가 없다.
 // ---------------------------------------------------------------------------
@@ -745,7 +701,7 @@ function showWelcome() {
       <div class="welcome-items">
         <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#9889;</span>
-          <span>질문 1회당 선택한 모델에 따라 이용권이 차감됩니다</span>
+          <span>질문 1회당 이용권 1장이 차감됩니다</span>
         </div>
         <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#128218;</span>
@@ -765,10 +721,5 @@ function showWelcome() {
 // Init
 // ---------------------------------------------------------------------------
 initTheme();
-Promise.all([loadModels(), loadCollections()]).then(() => showWelcome());
+loadCollections().then(() => showWelcome());
 checkAuth();
-
-// Persist model selection on change (registered once)
-document.getElementById("model-select").addEventListener("change", (e) => {
-  localStorage.setItem("selectedModel", e.target.value);
-});

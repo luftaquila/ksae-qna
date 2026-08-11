@@ -31,6 +31,9 @@ test("admin navigation and model controls work without health-check copy", async
   await page.getByRole("tab", { name: "모델" }).click();
   await expect(page.locator(".model-card")).toHaveCount(2);
   await expect(page.locator("#models-grid")).toContainText("API 키 설정됨");
+  await expect(page.locator("#models-grid")).toContainText("기본");
+  await expect(page.locator("#models-grid")).toContainText("폴백");
+  await expect(page.locator("#models-grid")).not.toContainText("차감 이용권");
   await expect(page.locator("#models-grid")).not.toContainText(/Canary|상태 확인|최근 요청 실패/);
   await expect(page).toHaveScreenshot("admin-desktop-models-light.png", { animations: "disabled" });
   await page.getByRole("tab", { name: "대화 기록" }).click();

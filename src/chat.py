@@ -23,7 +23,7 @@ from google.genai import types
 from qdrant_client import QdrantClient, models
 from sentence_transformers import SentenceTransformer
 
-from src.auth import get_model_settings_map, set_model_order as _db_set_model_order, set_model_settings
+from src.auth import get_model_settings_map, set_model_settings
 
 # Globals initialized once at server startup
 _model: SentenceTransformer | None = None
@@ -32,12 +32,13 @@ _gemini: genai.Client | None = None
 _anthropic: anthropic.AsyncAnthropic | None = None
 
 _model_enabled: dict[str, bool] = {}
-_model_credits: dict[str, int | None] = {}
-_model_order: dict[str, int] = {}  # model_key -> display_order
 _model_health: dict[str, dict[str, Any]] = {}
 
 PROMPT_VERSION = "2026-08-quality-v2"
+PRIMARY_MODEL_KEY = "gemini-3-pro"
 FALLBACK_MODEL_KEY = "gemini-3-flash"
+ROUTING_MODEL_KEYS = (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY)
+CHAT_CREDIT_COST = 1
 
 EMBEDDING_MODEL = "BAAI/bge-m3"
 # 검색 소스 레지스트리 — 컬렉션을 추가할 때 고쳐야 하는 유일한 곳.
@@ -93,7 +94,7 @@ MODEL_CONFIG = {
         # model is retired.  The resolved version is recorded per turn.
         "model_id": "gemini-pro-latest",
         "label": "Gemini Pro (Latest)",
-        "credits": 4,
+        "credits": 1,
         "thinking_level": "high",
         "pricing": {"input": 2.50, "output": 15.00, "thinking": 15.00},
     },
@@ -101,7 +102,7 @@ MODEL_CONFIG = {
         "provider": "anthropic",
         "model_id": "claude-sonnet-4-6-20250514",
         "label": "Claude Sonnet 4.6",
-        "credits": 5,
+        "credits": 1,
         "thinking_level": "high",
         "pricing": {"input": 3.00, "output": 15.00, "thinking": 15.00},
     },
@@ -109,7 +110,7 @@ MODEL_CONFIG = {
         "provider": "anthropic",
         "model_id": "claude-opus-4-6-20250514",
         "label": "Claude Opus 4.6",
-        "credits": 10,
+        "credits": 1,
         "thinking_level": "max",
         "pricing": {"input": 5.00, "output": 25.00, "thinking": 25.00},
     },
@@ -171,9 +172,6 @@ def init_model_settings() -> None:
     settings = get_model_settings_map()
     for key, val in settings.items():
         _model_enabled[key] = val["enabled"]
-        _model_credits[key] = val["credits"]
-        if val["display_order"] is not None:
-            _model_order[key] = val["display_order"]
 
 
 def _utc_now() -> str:
@@ -230,7 +228,7 @@ def get_health_status(include_errors: bool = False) -> dict[str, Any]:
             **_model_health.get(key, {"healthy": None, "resolved_model": None, "error": None, "last_checked_at": None}),
             "available": is_model_available(key),
         }
-        for key in MODEL_CONFIG
+        for key in ROUTING_MODEL_KEYS
     }
     if not include_errors:
         for state in model_states.values():
@@ -244,31 +242,25 @@ def get_health_status(include_errors: bool = False) -> dict[str, Any]:
     }
 
 
-def set_model_admin_settings(model_key: str, enabled: bool, credits: int | None = None) -> None:
-    """Update both DB and in-memory cache for enabled + credits."""
-    set_model_settings(model_key, enabled, credits)
+def set_model_admin_settings(model_key: str, enabled: bool) -> None:
+    """Enable or disable a routing model; per-model credit pricing is retired."""
+    set_model_settings(model_key, enabled, None)
     _model_enabled[model_key] = enabled
-    _model_credits[model_key] = credits
-
-
-def set_model_display_order(order: list[str]) -> None:
-    """Update display order in both DB and in-memory cache."""
-    _db_set_model_order(order)
-    _model_order.clear()
-    for idx, key in enumerate(order):
-        _model_order[key] = idx
 
 
 def get_effective_credits(model_key: str) -> int:
-    """Return admin-overridden credits or default from MODEL_CONFIG."""
-    custom = _model_credits.get(model_key)
-    if custom is not None:
-        return custom
-    return MODEL_CONFIG[model_key]["credits"]
+    """Return the single fixed charge retained for backward-compatible APIs."""
+    if model_key not in MODEL_CONFIG:
+        raise KeyError(model_key)
+    return CHAT_CREDIT_COST
 
 
 def is_model_available(model: str) -> bool:
-    """Check if a model's provider client is initialized and admin-enabled."""
+    """Check provider and admin availability.
+
+    Runtime health is diagnostic only: a transient failure must not permanently
+    prevent the primary model from being retried on later questions.
+    """
     cfg = MODEL_CONFIG.get(model)
     if not cfg:
         return False
@@ -276,65 +268,30 @@ def is_model_available(model: str) -> bool:
         return False
     if not _provider_available(model):
         return False
-    health = _model_health.get(model)
-    return health is None or health["healthy"]
-
-
-def _sort_key(model_key: str, idx: int) -> int:
-    """Return display order for sorting; fall back to dict insertion index."""
-    return _model_order.get(model_key, idx)
-
-
-def get_models() -> list[dict]:
-    """Return all models with availability status, sorted by display order."""
-    result = []
-    for idx, (model_key, cfg) in enumerate(MODEL_CONFIG.items()):
-        admin_enabled = _model_enabled.get(model_key, True)
-        provider_ok = _provider_available(model_key)
-        health = _model_health.get(model_key, {})
-        available = admin_enabled and provider_ok and health.get("healthy", True)
-        result.append({
-            "id": model_key,
-            "label": cfg["label"],
-            "credits": get_effective_credits(model_key),
-            "pricing": cfg["pricing"],
-            "available": available,
-            "resolved_model": health.get("resolved_model"),
-            "_order": _sort_key(model_key, idx),
-        })
-    result.sort(key=lambda x: x["_order"])
-    for r in result:
-        del r["_order"]
-    return result
+    return True
 
 
 def get_all_models_admin() -> list[dict]:
-    """Return all models with provider_available, admin_enabled, and available status, sorted by display order."""
+    """Return the fixed Pro-primary/Flash-fallback routing configuration."""
     result = []
-    for idx, (model_key, cfg) in enumerate(MODEL_CONFIG.items()):
+    for model_key in ROUTING_MODEL_KEYS:
+        cfg = MODEL_CONFIG[model_key]
         provider_available = _provider_available(model_key)
-
         admin_enabled = _model_enabled.get(model_key, True)
-
         health = _model_health.get(model_key, {})
         result.append({
             "id": model_key,
             "label": cfg["label"],
-            "default_credits": cfg["credits"],
-            "credits": get_effective_credits(model_key),
+            "role": "primary" if model_key == PRIMARY_MODEL_KEY else "fallback",
             "provider": cfg["provider"],
             "provider_available": provider_available,
             "admin_enabled": admin_enabled,
-            "available": provider_available and admin_enabled and health.get("healthy", True),
+            "available": provider_available and admin_enabled,
             "healthy": health.get("healthy"),
             "resolved_model": health.get("resolved_model"),
             "health_error": health.get("error"),
             "last_checked_at": health.get("last_checked_at"),
-            "_order": _sort_key(model_key, idx),
         })
-    result.sort(key=lambda x: x["_order"])
-    for r in result:
-        del r["_order"]
     return result
 
 
@@ -1164,7 +1121,6 @@ async def search_and_stream(
     category: str | None = None,
     competition: str | None = None,
     confidence: list[str] | None = None,
-    model: str = "gemini-3-flash",
 ) -> AsyncIterator[str]:
     """
     Async generator that yields SSE-formatted events:
@@ -1176,12 +1132,40 @@ async def search_and_stream(
 
     history: list of {"role": "user"|"assistant", "content": str} for multi-turn context.
     collections: list of collection keys ("qna", "rules") to search.
-    model: model key from MODEL_CONFIG.
+    Model routing is fixed: Gemini Pro first, then Gemini Flash on failure.
     """
     # Legacy callers may still pass ``confidence``; it is intentionally
     # ignored so AARK retrieval always covers the complete collection.
     del confidence
+    primary_available = is_model_available(PRIMARY_MODEL_KEY)
+    fallback_available = is_model_available(FALLBACK_MODEL_KEY)
+    if not primary_available and not fallback_available:
+        error = {
+            "provider": "gemini",
+            "code": "model_unavailable",
+            "message": "both primary and fallback models are unavailable",
+            "user_message": "답변 모델을 현재 사용할 수 없습니다. 잠시 후 다시 시도해주세요.",
+            "retryable": True,
+        }
+        yield f"event: error\ndata: {json.dumps(error, ensure_ascii=False)}\n\n"
+        yield "event: done\ndata: {}\n\n"
+        return
+
+    model = PRIMARY_MODEL_KEY if primary_available else FALLBACK_MODEL_KEY
     model_config = MODEL_CONFIG[model]
+
+    if model == FALLBACK_MODEL_KEY:
+        reason = {
+            "provider": "gemini",
+            "code": "primary_unavailable",
+            "message": "primary model is disabled or its provider is unavailable",
+        }
+        fallback_event = {
+            "from": PRIMARY_MODEL_KEY,
+            "to": FALLBACK_MODEL_KEY,
+            "reason": reason,
+        }
+        yield f"event: fallback\ndata: {json.dumps(fallback_event, ensure_ascii=False)}\n\n"
 
     # Step 1: Rewrite query for better search if we have conversation history
     search_query = query
@@ -1287,7 +1271,8 @@ async def search_and_stream(
 
         emitted_text = False
         should_fallback = False
-        async for event in _stream_gemini(contents, model):
+        stream_fallback_from = PRIMARY_MODEL_KEY if model == FALLBACK_MODEL_KEY else None
+        async for event in _stream_gemini(contents, model, fallback_from=stream_fallback_from):
             if event.startswith("event: token"):
                 emitted_text = True
             if event.startswith("event: error") and not emitted_text:

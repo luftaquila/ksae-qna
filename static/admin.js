@@ -653,7 +653,7 @@ function renderModels() {
   const grid = document.getElementById("models-grid");
   if (!grid) return;
 
-  grid.innerHTML = allModels.map((m, idx) => {
+  grid.innerHTML = allModels.map((m) => {
     const providerLabel = m.provider === "gemini" ? "Google Gemini" : "Anthropic";
     const providerStatus = !m.provider_available
       ? `<span class="model-provider-status disconnected">API 키 없음</span>`
@@ -663,28 +663,19 @@ function renderModels() {
       : "";
     const disabled = !m.provider_available ? "disabled" : "";
     const checked = m.admin_enabled ? "checked" : "";
-    const isCustom = m.credits !== m.default_credits;
-    const resetBtn = isCustom
-      ? `<button class="model-credits-reset" onclick="resetModelCredits('${m.id}')" title="기본값(${m.default_credits})으로 초기화">초기화</button>`
-      : "";
-    const defaultBadge = idx === 0 ? `<span class="model-default-badge">기본</span>` : "";
-    return `<div class="model-card${m.available ? "" : " unavailable"}" draggable="true" data-model-id="${m.id}">
-      <div class="model-drag-handle" title="드래그하여 순서 변경">⠿</div>
+    const roleBadge = m.role === "primary"
+      ? `<span class="model-default-badge">기본</span>`
+      : `<span class="model-fallback-badge">폴백</span>`;
+    return `<div class="model-card${m.available ? "" : " unavailable"}" data-model-id="${m.id}">
       <div class="model-card-body">
         <div class="model-card-header">
           <span class="model-card-label">${escapeHtml(m.label)}</span>
-          ${defaultBadge}
+          ${roleBadge}
         </div>
         <div class="model-card-provider">
           <span class="model-card-provider-name">${providerLabel}</span>
           ${providerStatus}
           ${resolvedModel}
-        </div>
-        <div class="model-card-credits-row">
-          <label class="model-credits-label">차감 이용권</label>
-          <input type="number" class="model-credits-input" min="0" value="${m.credits}"
-            data-model="${m.id}" onchange="updateModelCredits('${m.id}', this.value)">
-          ${resetBtn}
         </div>
         <div class="model-card-toggle">
           <label class="toggle-switch">
@@ -697,157 +688,21 @@ function renderModels() {
     </div>`;
   }).join("");
 
-  initModelDragAndDrop();
-}
-
-// ---------------------------------------------------------------------------
-// Model drag-and-drop reordering
-// ---------------------------------------------------------------------------
-let dragSrcEl = null;
-
-function initModelDragAndDrop() {
-  const grid = document.getElementById("models-grid");
-  if (!grid) return;
-
-  const cards = grid.querySelectorAll(".model-card");
-  cards.forEach((card) => {
-    card.addEventListener("dragstart", handleDragStart);
-    card.addEventListener("dragover", handleDragOver);
-    card.addEventListener("dragenter", handleDragEnter);
-    card.addEventListener("dragleave", handleDragLeave);
-    card.addEventListener("drop", handleDrop);
-    card.addEventListener("dragend", handleDragEnd);
-  });
-}
-
-function handleDragStart(e) {
-  dragSrcEl = this;
-  this.classList.add("dragging");
-  e.dataTransfer.effectAllowed = "move";
-  e.dataTransfer.setData("text/plain", this.dataset.modelId);
-}
-
-function handleDragOver(e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = "move";
-}
-
-function handleDragEnter(e) {
-  e.preventDefault();
-  const card = e.target.closest(".model-card");
-  if (card && card !== dragSrcEl) {
-    card.classList.add("drag-over");
-  }
-}
-
-function handleDragLeave(e) {
-  const card = e.target.closest(".model-card");
-  if (card) {
-    card.classList.remove("drag-over");
-  }
-}
-
-function handleDrop(e) {
-  e.preventDefault();
-  const targetCard = e.target.closest(".model-card");
-  if (!targetCard || targetCard === dragSrcEl) return;
-
-  targetCard.classList.remove("drag-over");
-
-  const grid = document.getElementById("models-grid");
-  const cards = [...grid.querySelectorAll(".model-card")];
-  const fromIdx = cards.indexOf(dragSrcEl);
-  const toIdx = cards.indexOf(targetCard);
-
-  // Reorder allModels array
-  const [moved] = allModels.splice(fromIdx, 1);
-  allModels.splice(toIdx, 0, moved);
-
-  renderModels();
-  saveModelOrder();
-}
-
-function handleDragEnd() {
-  this.classList.remove("dragging");
-  document.querySelectorAll(".model-card").forEach((c) => c.classList.remove("drag-over"));
-}
-
-async function saveModelOrder() {
-  const order = allModels.map((m) => m.id);
-  try {
-    await fetch("/api/admin/models/order", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ order }),
-    });
-  } catch {
-    // Silently fail — order is already applied visually
-  }
 }
 
 window.toggleModel = async function (modelKey, enabled) {
   const m = allModels.find((m) => m.id === modelKey);
-  const credits = m && m.credits !== m.default_credits ? m.credits : null;
   try {
     const res = await fetch(`/api/admin/models/${modelKey}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled, credits }),
+      body: JSON.stringify({ enabled }),
     });
     if (res.ok) {
       if (m) {
         m.admin_enabled = enabled;
-        m.available = m.provider_available && m.healthy !== false && enabled;
+        m.available = m.provider_available && enabled;
       }
-      renderModels();
-    } else {
-      const err = await res.json();
-      alert(err.error || "변경에 실패했습니다");
-      loadModels();
-    }
-  } catch {
-    alert("변경에 실패했습니다");
-    loadModels();
-  }
-};
-
-window.updateModelCredits = async function (modelKey, value) {
-  const credits = parseInt(value, 10);
-  if (isNaN(credits) || credits < 0) return;
-  const m = allModels.find((m) => m.id === modelKey);
-  if (!m) return;
-  try {
-    const res = await fetch(`/api/admin/models/${modelKey}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: m.admin_enabled, credits }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      m.credits = data.credits;
-      renderModels();
-    } else {
-      const err = await res.json();
-      alert(err.error || "변경에 실패했습니다");
-      loadModels();
-    }
-  } catch {
-    alert("변경에 실패했습니다");
-    loadModels();
-  }
-};
-
-window.resetModelCredits = async function (modelKey) {
-  const m = allModels.find((m) => m.id === modelKey);
-  if (!m) return;
-  try {
-    const res = await fetch(`/api/admin/models/${modelKey}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: m.admin_enabled, credits: null }),
-    });
-    if (res.ok) {
-      m.credits = m.default_credits;
       renderModels();
     } else {
       const err = await res.json();

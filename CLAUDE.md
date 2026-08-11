@@ -36,17 +36,19 @@ python mcp_server.py
 
 ### Request Flow (Chat)
 
-1. `server.py` POST `/api/chat` — 인증 확인, 모델 검증, 이용권 차감, 세션 생성/조회
+1. `server.py` POST `/api/chat` — 인증 확인, 이용권 1장 차감, 세션 생성/조회
 2. `src/chat.py` `search_and_stream()` — 벡터 검색 후 provider별 LLM 스트리밍
 3. SSE 이벤트: `sources` → `token`(반복) → `usage` → `done`
 4. `server.py`에서 asyncio.Queue로 LLM 소비/클라이언트 전달 분리 — 클라이언트 disconnect 시에도 LLM 태스크는 백그라운드에서 완료되어 응답 저장
 
-### Multi-Model Streaming
+### Model Routing
 
-- `src/chat.py`의 `MODEL_CONFIG` 딕셔너리가 모델 레지스트리 (model_id, provider, credits, pricing, thinking_level)
+- 사용자 모델 선택은 없으며 서버가 Gemini Pro (`gemini-pro-latest`)를 먼저 호출하고 실패하면 Gemini Flash로 폴백한다
+- `src/chat.py`의 `PRIMARY_MODEL_KEY`, `FALLBACK_MODEL_KEY`, `CHAT_CREDIT_COST`가 라우팅과 고정 이용권 비용을 정의한다
+- `MODEL_CONFIG` 딕셔너리는 모델 ID, provider, pricing, thinking level 메타데이터를 보관한다
 - provider별 스트리밍 분리: `_stream_gemini()` (동기 이터레이터를 `run_in_executor`로 래핑), `_stream_anthropic()` (네이티브 async)
-- 모델 활성화/비활성화/크레딧 오버라이드는 `model_settings` DB 테이블 + 인메모리 캐시 (`_model_enabled`, `_model_credits`, `_model_order`)
-- `GET /api/models`로 클라이언트에 사용 가능한 모델 목록 제공
+- 기본/폴백 모델 활성화 여부는 `model_settings` DB 테이블 + `_model_enabled` 인메모리 캐시에 저장한다
+- 클라이언트의 `/api/chat` 요청에는 모델 필드가 없고, 모델별 이용권 오버라이드나 표시 순서도 제공하지 않는다
 
 ### Vector Search
 
@@ -113,7 +115,7 @@ section 상한이 따로 있는 이유는 지식베이스에서 항목 하나가
 사용자에게 보이는 문자열만 이용권으로 쓴다.
 
 - Google OAuth 2.0 → JWT 쿠키 → `get_current_user(request)`
-- 이용권 차감: `deduct_credit(user_id, amount, memo)` — 모델별 가변 비용, `WHERE credits >= ?`로 원자적 차감
+- 이용권 차감: 질문당 항상 1장, `deduct_credit(user_id, amount, memo)`의 `WHERE credits >= ?`로 원자적 차감
 - LLM 에러 시 `refund_credit()`으로 환불
 - `unlimited_credits` 모드: site_settings에서 토글, `deduct_credit`/`refund_credit`이 스킵
 - `monthly_refill_credits`: 매월 1일(KST) 잔액이 설정값 미만인 사용자만 설정값까지 충전
@@ -151,7 +153,7 @@ Incremental 모드는 기존 posts.json과 비교하여 신규만 처리.
 바닐라 JS (`static/`). SSE via `fetch` + `ReadableStream`. marked.js로 마크다운 렌더링. CSS 변수 기반 라이트/다크 테마.
 관리자 페이지 (`/admin`): 사용자 이용권 관리, 대화 기록 열람, 모델별 API 토큰 사용량/비용 추산.
 
-컨트롤 바는 두 줄(모델 / 검색 소스)로 나뉜다. 소스 칩과 필터는 `/api/collections` 응답으로
+컨트롤 바에는 검색 소스만 표시한다. 소스 칩과 필터는 `/api/collections` 응답으로
 렌더되므로 소스를 추가해도 프론트엔드를 고칠 필요가 없다.
 검색 결과 출처는 신뢰도 배지(`.conf-badge`)와 발언일을 함께 표시한다 — 지식베이스는 URL이 없어
 발언일이 유일한 대조 단서다.

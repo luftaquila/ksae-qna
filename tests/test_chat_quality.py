@@ -13,6 +13,13 @@ def test_pro_uses_provider_maintained_latest_alias():
     assert chat.MODEL_CONFIG["gemini-3-pro"]["model_id"] == "gemini-pro-latest"
 
 
+def test_chat_routing_and_credit_cost_are_fixed():
+    assert chat.PRIMARY_MODEL_KEY == "gemini-3-pro"
+    assert chat.FALLBACK_MODEL_KEY == "gemini-3-flash"
+    assert chat.CHAT_CREDIT_COST == 1
+    assert all(chat.get_effective_credits(key) == 1 for key in chat.ROUTING_MODEL_KEYS)
+
+
 def test_competition_router_distinguishes_similar_electric_classes():
     assert chat._detect_competition("스마트 e 모빌리티 제동 규정") == "smart_e_mobility"
     assert chat._detect_competition("E-Formula GLVS 장착 위치") == "e_formula"
@@ -128,12 +135,45 @@ def test_pro_failure_before_first_token_falls_back_to_flash(monkeypatch):
         "search_with_metadata",
         lambda *_args, **_kwargs: ([], {"status": "ok", "failed_collections": {}}),
     )
-    monkeypatch.setattr(chat, "is_model_available", lambda key: key == "gemini-3-flash")
+    monkeypatch.setattr(chat, "is_model_available", lambda key: key in chat.ROUTING_MODEL_KEYS)
 
     async def collect():
-        return [event async for event in chat.search_and_stream("질문", model="gemini-3-pro")]
+        return [event async for event in chat.search_and_stream("질문")]
 
     events = asyncio.run(collect())
     assert any(event.startswith("event: fallback") for event in events)
     assert any("대체 응답" in event for event in events)
     assert not any(event.startswith("event: error") for event in events)
+
+
+def test_flash_is_used_directly_when_pro_is_unavailable(monkeypatch):
+    async def no_rewrite(_query, _history):
+        return None
+
+    async def no_rerank(_query, sources, _limit):
+        return sources
+
+    called = []
+
+    async def fake_stream(_contents, model_key, fallback_from=None):
+        called.append((model_key, fallback_from))
+        yield 'event: token\ndata: "대체 응답"\n\n'
+        yield 'event: usage\ndata: {"resolved_model":"gemini-3-flash"}\n\n'
+
+    monkeypatch.setattr(chat, "_rewrite_query", no_rewrite)
+    monkeypatch.setattr(chat, "_rerank_results", no_rerank)
+    monkeypatch.setattr(chat, "_stream_gemini", fake_stream)
+    monkeypatch.setattr(
+        chat,
+        "search_with_metadata",
+        lambda *_args, **_kwargs: ([], {"status": "ok", "failed_collections": {}}),
+    )
+    monkeypatch.setattr(chat, "is_model_available", lambda key: key == chat.FALLBACK_MODEL_KEY)
+
+    async def collect():
+        return [event async for event in chat.search_and_stream("질문")]
+
+    events = asyncio.run(collect())
+    assert called == [(chat.FALLBACK_MODEL_KEY, chat.PRIMARY_MODEL_KEY)]
+    assert any(event.startswith("event: fallback") for event in events)
+    assert any("대체 응답" in event for event in events)

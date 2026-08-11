@@ -65,19 +65,19 @@ from src.auth import (
     update_session_title,
 )
 from src.chat import (
+    CHAT_CREDIT_COST,
     COLLECTION_REGISTRY,
+    FALLBACK_MODEL_KEY,
     MODEL_CONFIG,
+    PRIMARY_MODEL_KEY,
     PROMPT_VERSION,
     get_all_models_admin,
-    get_effective_credits,
     get_health_status,
-    get_models,
     init_model_settings,
     init_resources,
     is_model_available,
     search_and_stream,
     set_model_admin_settings,
-    set_model_display_order,
 )
 
 load_dotenv()
@@ -169,7 +169,6 @@ class ChatRequest(BaseModel):
     collections: list[str] | None = None
     category: str | None = None
     competition: str | None = None
-    model: str = "gemini-3-flash"
 
 
 class SessionPatch(BaseModel):
@@ -187,7 +186,6 @@ class AdminCreditRequest(BaseModel):
 
 class ModelToggleRequest(BaseModel):
     enabled: bool
-    credits: int | None = Field(default=None, ge=0)
 
 
 class SiteSettingsRequest(BaseModel):
@@ -348,11 +346,6 @@ async def sessions_update(session_id: int, body: SessionPatch, request: Request)
 # ---------------------------------------------------------------------------
 # Chat (with auth + credit check + session persistence)
 # ---------------------------------------------------------------------------
-@app.get("/api/models")
-async def models_list():
-    return {"models": get_models()}
-
-
 @app.get("/api/collections")
 async def collections_list():
     """검색 소스 목록. 프론트엔드 칩·안내문은 이 응답으로 렌더된다."""
@@ -370,13 +363,10 @@ async def chat(request: Request, req: ChatRequest):
     if not user:
         return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
 
-    # Validate model
-    model_config = MODEL_CONFIG.get(req.model)
-    if not model_config:
-        return JSONResponse({"error": "지원하지 않는 모델입니다"}, status_code=400)
-
-    if not is_model_available(req.model):
-        return JSONResponse({"error": f"{model_config['label']} 모델의 상태 확인에 실패해 현재 사용할 수 없습니다."}, status_code=503)
+    # Model routing is server-owned: Pro is always attempted first and Flash
+    # is the only fallback. Client payloads cannot select or price a model.
+    if not any(is_model_available(key) for key in (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY)):
+        return JSONResponse({"error": "답변 모델을 현재 사용할 수 없습니다."}, status_code=503)
 
     invalid_collections = set(req.collections or []) - set(COLLECTION_REGISTRY)
     if invalid_collections:
@@ -393,8 +383,8 @@ async def chat(request: Request, req: ChatRequest):
         if not session:
             return JSONResponse({"error": "세션을 찾을 수 없습니다"}, status_code=404)
 
-    credits_needed = get_effective_credits(req.model)
-    model_label = model_config["label"]
+    credits_needed = CHAT_CREDIT_COST
+    model_label = MODEL_CONFIG[PRIMARY_MODEL_KEY]["label"]
 
     if not deduct_credit(user["id"], credits_needed, f"질문 ({model_label})"):
         return JSONResponse({"error": "이용권이 부족합니다"}, status_code=402)
@@ -416,7 +406,7 @@ async def chat(request: Request, req: ChatRequest):
             session_id,
             user_message["id"],
             req.query,
-            req.model,
+            PRIMARY_MODEL_KEY,
             collections=json.dumps(req.collections, ensure_ascii=False) if req.collections else None,
             category=req.category,
             competition=req.competition,
@@ -488,7 +478,6 @@ async def chat(request: Request, req: ChatRequest):
                 collections=req.collections,
                 category=req.category,
                 competition=req.competition,
-                model=req.model,
             ):
                 event_type, payload = parse_event(event)
 
@@ -552,10 +541,6 @@ async def chat(request: Request, req: ChatRequest):
         finally:
             if has_error:
                 refund_credit(user["id"], credits_needed, f"오류 환불 ({model_label})")
-            elif has_fallback and resolved_model:
-                fallback_refund = max(0, credits_needed - get_effective_credits(resolved_model))
-                if fallback_refund:
-                    refund_credit(user["id"], fallback_refund, f"대체 모델 차액 환불 ({model_label})")
 
             total_ms = round((time.monotonic() - started_at) * 1000)
             generation_ms = (
@@ -574,14 +559,14 @@ async def chat(request: Request, req: ChatRequest):
                     input_tokens,
                     output_tokens,
                     thinking_tokens,
-                    model=resolved_model or req.model,
+                    model=resolved_model or PRIMARY_MODEL_KEY,
                     rewritten_query=rewritten_query,
                     turn_id=turn_id,
                 )
                 complete_chat_turn(
                     turn_id,
                     assistant_message_id=assistant_message["id"],
-                    resolved_model=resolved_model or req.model,
+                    resolved_model=resolved_model or PRIMARY_MODEL_KEY,
                     resolved_model_id=resolved_model_id,
                     rewritten_query=rewritten_query,
                     competition=competition,
@@ -767,26 +752,10 @@ async def admin_turns_list(request: Request, limit: int = 100, status: str | Non
 async def admin_toggle_model(model_key: str, body: ModelToggleRequest, request: Request):
     if not is_admin(request):
         return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
-    if model_key not in MODEL_CONFIG:
+    if model_key not in (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY):
         return JSONResponse({"error": "존재하지 않는 모델입니다"}, status_code=404)
-    set_model_admin_settings(model_key, body.enabled, body.credits)
-    return {"ok": True, "model_key": model_key, "enabled": body.enabled, "credits": get_effective_credits(model_key)}
-
-
-class ModelOrderRequest(BaseModel):
-    order: list[str]
-
-
-@app.put("/api/admin/models/order")
-async def admin_set_model_order(body: ModelOrderRequest, request: Request):
-    if not is_admin(request):
-        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
-    # Validate all keys exist
-    for key in body.order:
-        if key not in MODEL_CONFIG:
-            return JSONResponse({"error": f"존재하지 않는 모델: {key}"}, status_code=400)
-    set_model_display_order(body.order)
-    return {"ok": True, "order": body.order}
+    set_model_admin_settings(model_key, body.enabled)
+    return {"ok": True, "model_key": model_key, "enabled": body.enabled}
 
 
 @app.get("/api/admin/settings")

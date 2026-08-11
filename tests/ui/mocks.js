@@ -1,8 +1,3 @@
-export const chatModels = [
-  { id: "gemini-3-flash", label: "Gemini 3 Flash", credits: 1, available: true },
-  { id: "gemini-3-pro", label: "Gemini Pro (Latest)", credits: 4, available: true },
-];
-
 export const collections = [
   { key: "rules", label: "규정", description: "대회 규정집 (2026 Formula)" },
   { key: "qna", label: "Q&A", description: "KSAE Q&A 게시판", filter: "category" },
@@ -46,8 +41,7 @@ export const adminModels = [
   {
     id: "gemini-3-pro",
     label: "Gemini Pro (Latest)",
-    default_credits: 4,
-    credits: 4,
+    role: "primary",
     provider: "gemini",
     provider_available: true,
     admin_enabled: true,
@@ -58,8 +52,7 @@ export const adminModels = [
   {
     id: "gemini-3-flash",
     label: "Gemini 3 Flash",
-    default_credits: 1,
-    credits: 2,
+    role: "fallback",
     provider: "gemini",
     provider_available: true,
     admin_enabled: true,
@@ -75,7 +68,6 @@ export async function installChatMocks(page) {
     const url = new URL(request.url());
     const path = url.pathname;
     if (path === "/api/me") return route.fulfill({ json: { user: { id: 1, name: "김피트", email: "pit@example.com", picture: null, credits: 18, is_admin: true }, low_credit_threshold: 5, unlimited_credits: false } });
-    if (path === "/api/models") return route.fulfill({ json: { models: chatModels } });
     if (path === "/api/collections") return route.fulfill({ json: { collections } });
     if (path === "/api/sessions") return route.fulfill({ json: { sessions: [{ id: 10, title: "Formula 지상고 기준" }] } });
     if (path === "/api/transactions") return route.fulfill({ json: { transactions: [] } });
@@ -85,11 +77,11 @@ export async function installChatMocks(page) {
         `event: sources\ndata: ${JSON.stringify(sources)}\n\n`,
         `event: model\ndata: ${JSON.stringify({ resolved_model: "gemini-pro-latest" })}\n\n`,
         `event: token\ndata: ${JSON.stringify("결론부터 말하면, 측정 조건을 먼저 확인해야 합니다.")}\n\n`,
-        `event: credits\ndata: ${JSON.stringify({ remaining: 14 })}\n\n`,
+        `event: credits\ndata: ${JSON.stringify({ remaining: 17 })}\n\n`,
         `event: session\ndata: ${JSON.stringify({ session_id: 11 })}\n\n`,
         "event: done\ndata: {}\n\n",
       ].join("");
-      return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream", "x-credits-remaining": "14" }, body });
+      return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream", "x-credits-remaining": "17" }, body });
     }
     if (/\/api\/sessions\/\d+\/messages/.test(path)) return route.fulfill({ json: { messages: [] } });
     if (/\/api\/sessions\/\d+/.test(path) && request.method() === "DELETE") return route.fulfill({ json: { ok: true } });
@@ -122,8 +114,7 @@ export async function installAdminMocks(page) {
     if (/\/api\/admin\/users\/\d+\/transactions/.test(path)) return route.fulfill({ json: { transactions: [] } });
     if (/\/api\/admin\/users\/\d+\/token-usage/.test(path)) return route.fulfill({ json: { usage: users[0].model_usage } });
     if (/\/api\/admin\/users\/\d+\/credits/.test(path) && request.method() === "PATCH") return route.fulfill({ json: { credits: 20 } });
-    if (/\/api\/admin\/models\//.test(path) && request.method() === "PATCH") return route.fulfill({ json: { ok: true, credits: 4 } });
-    if (path === "/api/admin/models/order" && request.method() === "PUT") return route.fulfill({ json: { ok: true } });
+    if (/\/api\/admin\/models\//.test(path) && request.method() === "PATCH") return route.fulfill({ json: { ok: true } });
     if (path === "/api/admin/credits/monthly-refill" && request.method() === "POST") return route.fulfill({ json: { ok: true, target_credits: 24, affected_users: 1, total_credits: 21 } });
     if (path === "/api/admin/credits/bulk" && request.method() === "POST") return route.fulfill({ json: { ok: true, affected: 2 } });
     return route.fulfill({ status: 404, json: { error: `Unhandled mock: ${path}` } });

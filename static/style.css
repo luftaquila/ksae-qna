@@ -757,7 +757,6 @@ header {
   gap: 5px;
 }
 
-.model-select,
 .category-select,
 .collection-chip {
   min-height: 30px;
@@ -769,7 +768,6 @@ header {
   white-space: nowrap;
 }
 
-.model-select,
 .category-select {
   max-width: 210px;
   padding: 4px 26px 4px 9px;
@@ -1043,9 +1041,7 @@ header {
   .msg.user { max-width: 88%; }
   .input-area { padding: 9px 12px max(12px, env(safe-area-inset-bottom)); }
   .control-bar { align-items: flex-start; flex-direction: column; gap: 7px; }
-  .model-group,
   .source-group { width: 100%; }
-  .model-select { max-width: none; flex: 1; }
   .source-group { align-items: flex-start; flex-direction: column; justify-content: flex-start; gap: 4px; }
   .collection-selector { width: 100%; align-items: flex-start; }
   .input-row button { min-width: 48px; width: 48px; padding: 0; }

@@ -31,10 +31,12 @@ test("chat sends a question and renders streamed evidence", async ({ page }) => 
   const chatRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/chat");
   await page.locator("#query").fill("지상고 기준은?");
   await page.locator("#query").press("Enter");
-  expect((await chatRequest).postDataJSON()).not.toHaveProperty("confidence");
+  const chatPayload = (await chatRequest).postDataJSON();
+  expect(chatPayload).not.toHaveProperty("confidence");
+  expect(chatPayload).not.toHaveProperty("model");
   await expect(page.locator(".msg.assistant .answer")).toContainText("측정 조건을 먼저 확인해야 합니다");
   await expect(page.getByRole("button", { name: /참고 문서 1건/ })).toBeVisible();
-  await expect(page.locator("#credit-badge")).toContainText("14 이용권");
+  await expect(page.locator("#credit-badge")).toContainText("17 이용권");
   await expect(page).toHaveScreenshot("chat-mobile-response-light.png", { animations: "disabled" });
 });
 
@@ -57,7 +59,7 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   await page.goto("/static/index.html");
   await expect(page.locator(".welcome-title")).toHaveText("PitBot");
   await expect(page.locator(".welcome-subtitle")).toHaveText("자작자동차 규정 및 Q&A 챗봇");
-  await expect(page.locator(".welcome-items")).toContainText("질문 1회당 선택한 모델에 따라 이용권이 차감됩니다");
+  await expect(page.locator(".welcome-items")).toContainText("질문 1회당 이용권 1장이 차감됩니다");
   await expect(page.locator(".welcome-items")).toContainText("입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.");
   await expect(page.locator(".welcome-icon")).toHaveText(["⚡", "📚"]);
   const guideFontSize = await page.locator(".welcome-item").first().evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
@@ -77,6 +79,7 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   });
   expect(new Set(endingRows).size).toBe(1);
   await expect(page.locator(".welcome")).not.toContainText("사용 모델");
+  await expect(page.locator("#model-select")).toHaveCount(0);
   await expect(page.locator("#query")).toHaveAttribute("placeholder", "질문을 입력하세요...");
   await expect(page.locator(".source-group .control-label")).toHaveText("검색 소스");
   await expect(page.locator("#send span")).toHaveText("전송");
