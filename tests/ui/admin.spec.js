@@ -46,6 +46,31 @@ test("admin has no serious accessibility violations", async ({ page }) => {
   expect(results.violations.filter((violation) => ["serious", "critical"].includes(violation.impact))).toEqual([]);
 });
 
+test("admin configures and immediately applies the monthly credit refill", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await setThemeBeforeLoad(page, "light");
+  await installAdminMocks(page);
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.goto("/static/admin.html");
+  await page.getByRole("tab", { name: "설정" }).click();
+
+  const input = page.locator("#setting-monthly-refill-credits");
+  await expect(input).toHaveValue("20");
+  await input.fill("24");
+
+  const settingsRequest = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === "/api/admin/settings" && request.method() === "PATCH"
+  );
+  const refillRequest = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === "/api/admin/credits/monthly-refill" && request.method() === "POST"
+  );
+  await page.locator("#monthly-refill-btn").click();
+
+  expect((await settingsRequest).postDataJSON()).toMatchObject({ monthly_refill_credits: 24 });
+  await refillRequest;
+  await expect(page).toHaveScreenshot("admin-desktop-settings-light.png", { animations: "disabled" });
+});
+
 for (const width of [320, 375, 414, 768]) {
   test(`admin does not overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
@@ -53,5 +78,8 @@ for (const width of [320, 375, 414, 768]) {
     await page.goto("/static/admin.html");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
+    await page.getByRole("tab", { name: "설정" }).click();
+    const settingsOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(settingsOverflow).toBeLessThanOrEqual(0);
   });
 }

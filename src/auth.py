@@ -5,6 +5,7 @@ Authentication, user DB, and credit system for KSAE Q&A chatbot.
 import os
 import sqlite3
 import time
+from datetime import datetime, timedelta, timezone
 
 import jwt
 from authlib.integrations.starlette_client import OAuth
@@ -224,6 +225,20 @@ def init_db() -> None:
         """
     )
 
+    # Idempotency ledger for the automatic monthly credit refill.  One row
+    # per KST calendar month prevents duplicate grants after restarts.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS monthly_credit_refills (
+            period          TEXT PRIMARY KEY,
+            target_credits  INTEGER NOT NULL,
+            affected_users INTEGER NOT NULL,
+            total_credits   INTEGER NOT NULL,
+            completed_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+
     # Migrate: add credits column to model_settings
     try:
         conn.execute("ALTER TABLE model_settings ADD COLUMN credits INTEGER")
@@ -253,6 +268,7 @@ _site_settings: dict[str, str] = {}
 
 _SITE_DEFAULTS: dict[str, str] = {
     "default_credits": "15",
+    "monthly_refill_credits": "20",
     "low_credit_threshold": "5",
     "unlimited_credits": "false",
 }
@@ -290,6 +306,147 @@ def get_default_credits() -> int:
         return max(0, int(get_site_setting("default_credits")))
     except (ValueError, TypeError):
         return 1
+
+
+def get_monthly_refill_credits() -> int:
+    """Return the credit floor applied on the first day of each KST month."""
+    try:
+        return max(0, int(get_site_setting("monthly_refill_credits")))
+    except (ValueError, TypeError):
+        return 20
+
+
+KST = timezone(timedelta(hours=9))
+
+
+def _refill_users_to_floor(
+    conn: sqlite3.Connection,
+    target: int,
+    transaction_type: str,
+    memo: str,
+) -> tuple[int, int]:
+    """Raise balances below *target* using the caller's open transaction."""
+    rows = conn.execute(
+        "SELECT id, credits FROM users WHERE credits < ? ORDER BY id",
+        (target,),
+    ).fetchall()
+    total_credits = 0
+    for row in rows:
+        amount = target - row["credits"]
+        conn.execute(
+            "UPDATE users SET credits = ?, updated_at = datetime('now') WHERE id = ?",
+            (target, row["id"]),
+        )
+        conn.execute(
+            "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
+            (row["id"], amount, transaction_type, memo),
+        )
+        total_credits += amount
+    return len(rows), total_credits
+
+
+def apply_monthly_credit_refill(now: datetime | None = None) -> dict:
+    """Raise balances below the configured floor once on each KST month start.
+
+    The monthly ledger and ``BEGIN IMMEDIATE`` make this safe across restarts
+    and overlapping workers.  Calls outside the first calendar day are a
+    no-op, so deploying the feature mid-month never grants credits early.
+    """
+    if now is None:
+        kst_now = datetime.now(KST)
+    elif now.tzinfo is None:
+        kst_now = now.replace(tzinfo=KST)
+    else:
+        kst_now = now.astimezone(KST)
+
+    period = kst_now.strftime("%Y-%m")
+    target = get_monthly_refill_credits()
+    if kst_now.day != 1:
+        return {
+            "applied": False,
+            "reason": "not_due",
+            "period": period,
+            "target_credits": target,
+            "affected_users": 0,
+            "total_credits": 0,
+        }
+
+    conn = _get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            """
+            SELECT target_credits, affected_users, total_credits
+            FROM monthly_credit_refills
+            WHERE period = ?
+            """,
+            (period,),
+        ).fetchone()
+        if existing:
+            conn.rollback()
+            return {
+                "applied": False,
+                "reason": "already_applied",
+                "period": period,
+                "target_credits": existing["target_credits"],
+                "affected_users": existing["affected_users"],
+                "total_credits": existing["total_credits"],
+            }
+
+        affected_users, total_credits = _refill_users_to_floor(
+            conn,
+            target,
+            "monthly_refill",
+            f"월 기본 이용권 충전 ({period})",
+        )
+
+        conn.execute(
+            """
+            INSERT INTO monthly_credit_refills
+                (period, target_credits, affected_users, total_credits)
+            VALUES (?, ?, ?, ?)
+            """,
+            (period, target, affected_users, total_credits),
+        )
+        conn.commit()
+        return {
+            "applied": True,
+            "reason": "applied",
+            "period": period,
+            "target_credits": target,
+            "affected_users": affected_users,
+            "total_credits": total_credits,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def admin_refill_credits_to_floor(target: int) -> dict:
+    """Immediately raise all balances below *target* and record each grant."""
+    target = max(0, int(target))
+    conn = _get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        affected_users, total_credits = _refill_users_to_floor(
+            conn,
+            target,
+            "admin_refill",
+            "관리자 즉시 기본 이용권 충전",
+        )
+        conn.commit()
+        return {
+            "target_credits": target,
+            "affected_users": affected_users,
+            "total_credits": total_credits,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def is_unlimited_credits() -> bool:

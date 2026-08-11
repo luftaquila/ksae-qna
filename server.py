@@ -9,7 +9,7 @@ import os
 import secrets
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,8 @@ from src.auth import (
     add_credits,
     add_message,
     admin_bulk_set_credits,
+    admin_refill_credits_to_floor,
+    apply_monthly_credit_refill,
     get_user_by_id,
     refund_credit,
     admin_get_messages,
@@ -39,6 +41,7 @@ from src.auth import (
     get_all_site_settings,
     get_current_user,
     get_messages,
+    get_monthly_refill_credits,
     get_recent_messages,
     get_site_setting,
     get_all_users_token_usage_by_model,
@@ -100,6 +103,26 @@ def _ensure_jwt_secret() -> str:
 JWT_SECRET = _ensure_jwt_secret()
 
 
+async def _monthly_credit_refill_worker() -> None:
+    """Check hourly and apply the KST month-start refill exactly once."""
+    while True:
+        try:
+            result = await asyncio.to_thread(apply_monthly_credit_refill)
+            if result["applied"]:
+                logger.info(
+                    "Monthly credit refill applied: period=%s target=%s users=%s credits=%s",
+                    result["period"],
+                    result["target_credits"],
+                    result["affected_users"],
+                    result["total_credits"],
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Monthly credit refill failed")
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -108,7 +131,13 @@ async def lifespan(app: FastAPI):
     init_site_settings()
     init_resources()
     init_model_settings()
-    yield
+    refill_task = asyncio.create_task(_monthly_credit_refill_worker())
+    try:
+        yield
+    finally:
+        refill_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await refill_task
 
 
 app = FastAPI(lifespan=lifespan)
@@ -163,6 +192,7 @@ class ModelToggleRequest(BaseModel):
 
 class SiteSettingsRequest(BaseModel):
     default_credits: int = Field(..., ge=0, le=10000)
+    monthly_refill_credits: int | None = Field(default=None, ge=0, le=10000)
     low_credit_threshold: int = Field(..., ge=0, le=10000)
     unlimited_credits: bool = Field(default=False)
 
@@ -676,6 +706,14 @@ async def admin_bulk_credits(body: BulkCreditRequest, request: Request):
     return {"ok": True, "affected": affected}
 
 
+@app.post("/api/admin/credits/monthly-refill")
+async def admin_monthly_refill_now(request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    result = admin_refill_credits_to_floor(get_monthly_refill_credits())
+    return {"ok": True, **result}
+
+
 @app.get("/api/admin/users/{user_id}/token-usage")
 async def admin_user_token_usage(user_id: int, request: Request):
     if not is_admin(request):
@@ -763,6 +801,8 @@ async def admin_update_settings(body: SiteSettingsRequest, request: Request):
     if not is_admin(request):
         return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
     set_site_setting("default_credits", str(body.default_credits))
+    if body.monthly_refill_credits is not None:
+        set_site_setting("monthly_refill_credits", str(body.monthly_refill_credits))
     set_site_setting("low_credit_threshold", str(body.low_credit_threshold))
     set_site_setting("unlimited_credits", str(body.unlimited_credits).lower())
     return {"ok": True, "settings": get_all_site_settings()}

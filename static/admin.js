@@ -872,6 +872,10 @@ async function loadSettings() {
     if (input && settings.default_credits !== undefined) {
       input.value = settings.default_credits;
     }
+    const monthlyRefillInput = document.getElementById("setting-monthly-refill-credits");
+    if (monthlyRefillInput && settings.monthly_refill_credits !== undefined) {
+      monthlyRefillInput.value = settings.monthly_refill_credits;
+    }
     const thresholdInput = document.getElementById("setting-low-credit-threshold");
     if (thresholdInput && settings.low_credit_threshold !== undefined) {
       thresholdInput.value = settings.low_credit_threshold;
@@ -898,13 +902,17 @@ function autoSaveSettings() {
 
 async function doSaveSettings() {
   const input = document.getElementById("setting-default-credits");
+  const monthlyRefillInput = document.getElementById("setting-monthly-refill-credits");
   const thresholdInput = document.getElementById("setting-low-credit-threshold");
   const unlimitedCheckbox = document.getElementById("setting-unlimited-credits");
-  if (!input || !thresholdInput) return;
+  if (!input || !monthlyRefillInput || !thresholdInput) return false;
 
   const defaultCredits = parseInt(input.value, 10);
+  const monthlyRefillCredits = parseInt(monthlyRefillInput.value, 10);
   const threshold = parseInt(thresholdInput.value, 10);
-  if (isNaN(defaultCredits) || defaultCredits < 0 || isNaN(threshold) || threshold < 0) return;
+  if (isNaN(defaultCredits) || defaultCredits < 0 ||
+      isNaN(monthlyRefillCredits) || monthlyRefillCredits < 0 ||
+      isNaN(threshold) || threshold < 0) return false;
 
   try {
     const res = await fetch("/api/admin/settings", {
@@ -912,6 +920,7 @@ async function doSaveSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         default_credits: defaultCredits,
+        monthly_refill_credits: monthlyRefillCredits,
         low_credit_threshold: threshold,
         unlimited_credits: unlimitedCheckbox ? unlimitedCheckbox.checked : false,
       }),
@@ -920,19 +929,49 @@ async function doSaveSettings() {
       const data = await res.json();
       lowCreditThreshold = parseInt(data.settings.low_credit_threshold, 10) || 5;
       renderUsers(userSearch.value);
+      return true;
     }
   } catch {
     // silently ignore — value will be retried on next change
   }
+  return false;
 }
 
 document.getElementById("setting-default-credits").addEventListener("change", autoSaveSettings);
+document.getElementById("setting-monthly-refill-credits").addEventListener("change", autoSaveSettings);
 document.getElementById("setting-low-credit-threshold").addEventListener("change", autoSaveSettings);
 
 document.getElementById("setting-unlimited-credits").addEventListener("change", () => {
   const label = document.getElementById("unlimited-label");
   if (label) label.textContent = document.getElementById("setting-unlimited-credits").checked ? "활성" : "비활성";
   autoSaveSettings();
+});
+
+document.getElementById("monthly-refill-btn").addEventListener("click", async () => {
+  const input = document.getElementById("setting-monthly-refill-credits");
+  const credits = parseInt(input.value, 10);
+  if (isNaN(credits) || credits < 0) return;
+  if (!confirm(`이용권이 ${credits}개 미만인 모든 사용자를 ${credits}개까지 즉시 충전합니다. 계속하시겠습니까?`)) return;
+
+  clearTimeout(_settingsSaveTimer);
+  if (!await doSaveSettings()) {
+    alert("설정 저장에 실패했습니다");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/admin/credits/monthly-refill", { method: "POST" });
+    if (res.ok) {
+      const data = await res.json();
+      alert(`${data.affected_users}명에게 총 ${data.total_credits}개의 이용권을 충전했습니다.`);
+      loadUsers();
+    } else {
+      const err = await res.json();
+      alert(err.error || "즉시 충전에 실패했습니다");
+    }
+  } catch {
+    alert("즉시 충전에 실패했습니다");
+  }
 });
 
 document.getElementById("bulk-credit-btn").addEventListener("click", async () => {

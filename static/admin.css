@@ -302,6 +302,7 @@
 .credit-save-btn,
 .credit-cancel-btn,
 .model-credits-reset,
+.monthly-refill-btn,
 .bulk-credit-btn {
   min-height: 30px;
   padding: 4px 9px;
@@ -322,6 +323,7 @@
 }
 
 .credit-save-btn,
+.monthly-refill-btn,
 .bulk-credit-btn {
   border-color: var(--color-primary);
   color: #fff;

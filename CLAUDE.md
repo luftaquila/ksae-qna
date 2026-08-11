@@ -116,17 +116,19 @@ section 상한이 따로 있는 이유는 지식베이스에서 항목 하나가
 - 이용권 차감: `deduct_credit(user_id, amount, memo)` — 모델별 가변 비용, `WHERE credits >= ?`로 원자적 차감
 - LLM 에러 시 `refund_credit()`으로 환불
 - `unlimited_credits` 모드: site_settings에서 토글, `deduct_credit`/`refund_credit`이 스킵
+- `monthly_refill_credits`: 매월 1일(KST) 잔액이 설정값 미만인 사용자만 설정값까지 충전
+- 월 자동 충전은 `monthly_credit_refills`의 월별 PK로 중복 실행을 막고, 관리자는 같은 floor 충전을 즉시 실행 가능
 - 세션 삭제는 soft delete (`deleted_at` 컬럼) — 사용자에게는 숨기고 관리자는 열람 가능
 
 ### Database
 
 SQLite (`data/users.db`), WAL 모드. 테이블:
-- `users`, `sessions`, `messages`, `token_transactions`, `model_settings`, `site_settings`
+- `users`, `sessions`, `messages`, `token_transactions`, `model_settings`, `site_settings`, `monthly_credit_refills`
 - 스키마 마이그레이션은 `init_db()`에서 `ALTER TABLE ... ADD COLUMN`을 try/except로 처리
 
 ### Initialization
 
-`server.py` lifespan에서 순서대로: `init_db()` → `init_oauth()` → `init_admin_emails()` → `init_site_settings()` → `init_resources()` (BGE-M3 로드, Qdrant/Gemini/Anthropic 클라이언트) → `init_model_settings()`
+`server.py` lifespan에서 순서대로: `init_db()` → `init_oauth()` → `init_admin_emails()` → `init_site_settings()` → `init_resources()` (BGE-M3 로드, Qdrant/Gemini/Anthropic 클라이언트) → `init_model_settings()` → 월 충전 worker 시작
 
 ### Data Pipeline (main.py)
 

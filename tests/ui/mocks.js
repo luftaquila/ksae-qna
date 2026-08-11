@@ -106,8 +106,16 @@ export async function installAdminMocks(page) {
     if (path === "/api/admin/check") return route.fulfill({ json: { admin: true, email: "admin@example.com" } });
     if (path === "/api/admin/users") return route.fulfill({ json: { users } });
     if (path === "/api/admin/models") return route.fulfill({ json: { models: adminModels } });
-    if (path === "/api/admin/settings" && request.method() === "GET") return route.fulfill({ json: { settings: { default_credits: "15", low_credit_threshold: "5", unlimited_credits: "false" } } });
-    if (path === "/api/admin/settings" && request.method() === "PATCH") return route.fulfill({ json: { ok: true, settings: { default_credits: "15", low_credit_threshold: "5", unlimited_credits: "false" } } });
+    if (path === "/api/admin/settings" && request.method() === "GET") return route.fulfill({ json: { settings: { default_credits: "15", monthly_refill_credits: "20", low_credit_threshold: "5", unlimited_credits: "false" } } });
+    if (path === "/api/admin/settings" && request.method() === "PATCH") {
+      const body = request.postDataJSON();
+      return route.fulfill({ json: { ok: true, settings: {
+        default_credits: String(body.default_credits),
+        monthly_refill_credits: String(body.monthly_refill_credits),
+        low_credit_threshold: String(body.low_credit_threshold),
+        unlimited_credits: String(body.unlimited_credits),
+      } } });
+    }
     if (path === "/api/admin/sessions") return route.fulfill({ json: { sessions: [{ id: 10, title: "Formula 지상고 기준", user_name: "김피트", updated_at: "2026-08-01T03:00:00", deleted_at: null }] } });
     if (/\/api\/admin\/users\/\d+\/sessions/.test(path)) return route.fulfill({ json: { sessions: [] } });
     if (/\/api\/admin\/sessions\/\d+\/messages/.test(path)) return route.fulfill({ json: { messages: [{ id: 1, role: "user", content: "지상고 기준은?", created_at: "2026-08-01T03:00:00" }, { id: 2, role: "assistant", content: "측정 조건을 먼저 확인해야 합니다.", created_at: "2026-08-01T03:01:00", model: "gemini-3-pro", input_tokens: 100, output_tokens: 30, thinking_tokens: 12, sources: "[]" }] } });
@@ -116,6 +124,7 @@ export async function installAdminMocks(page) {
     if (/\/api\/admin\/users\/\d+\/credits/.test(path) && request.method() === "PATCH") return route.fulfill({ json: { credits: 20 } });
     if (/\/api\/admin\/models\//.test(path) && request.method() === "PATCH") return route.fulfill({ json: { ok: true, credits: 4 } });
     if (path === "/api/admin/models/order" && request.method() === "PUT") return route.fulfill({ json: { ok: true } });
+    if (path === "/api/admin/credits/monthly-refill" && request.method() === "POST") return route.fulfill({ json: { ok: true, target_credits: 24, affected_users: 1, total_credits: 21 } });
     if (path === "/api/admin/credits/bulk" && request.method() === "POST") return route.fulfill({ json: { ok: true, affected: 2 } });
     return route.fulfill({ status: 404, json: { error: `Unhandled mock: ${path}` } });
   });

@@ -94,6 +94,14 @@
             <p class="settings-hint">새로 가입하는 사용자에게 자동으로 지급되는 이용권 수</p>
           </div>
           <div class="settings-row">
+            <label class="settings-label" for="setting-monthly-refill-credits">매월 기본 충전 이용권</label>
+            <div class="settings-input-group">
+              <input type="number" id="setting-monthly-refill-credits" min="0" max="10000" value="20">
+              <button class="monthly-refill-btn" id="monthly-refill-btn">지금 충전</button>
+            </div>
+            <p class="settings-hint">매월 1일, 이용권이 이 값보다 적은 사용자는 이 값까지 자동 충전됩니다</p>
+          </div>
+          <div class="settings-row">
             <label class="settings-label" for="setting-low-credit-threshold">이용권 부족 경고 기준</label>
             <div class="settings-input-group">
               <input type="number" id="setting-low-credit-threshold" min="0" max="10000" value="5">
