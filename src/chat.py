@@ -81,12 +81,11 @@ def _build_collection_registry() -> dict[str, dict]:
         "kb": {
             "collection": "ksae-aark-kb",
             "label": "AARK",
-            "description": "참가팀 익명 단톡방 지식베이스 (2025-02 ~ 2026-08)",
-            "authority": "경험담",
-            "filter": "confidence",
-            "source_type": "aark",
-            "year": "",
-        },
+        "description": "참가팀 익명 단톡방 지식베이스 (2025-02 ~ 2026-08)",
+        "authority": "경험담",
+        "source_type": "aark",
+        "year": "",
+    },
     }
 
     for info in rules_collection_registry(year=RULES_COLLECTION_YEAR).values():
