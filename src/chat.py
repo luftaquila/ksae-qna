@@ -1285,6 +1285,12 @@ _RULE_QUERY_NORMALIZERS = (
     (re.compile(r"\b심사\s*규정\b", re.IGNORECASE), "심사규정"),
     (re.compile(r"\b안전\s*규정\b", re.IGNORECASE), "안전규정"),
 )
+_VEHICLE_TECHNICAL_QUERY_RE = re.compile(
+    r"방화벽|안전\s*벨트|시트|프레임|롤\s*후프|브레이크|제동|조향|현가|"
+    r"타이어|휠|엔진|배기|클램프|체인\s*가드|체인가드|축전지|배터리|"
+    r"모터|고전압|페달|연료|섀시|차체|브라켓|\bglvs\b|\bbms\b",
+    re.IGNORECASE,
+)
 _RULE_QUERY_STOP_WORDS = {
     "규정",
     "문서",
@@ -1343,6 +1349,12 @@ def _normalize_rule_query(query: str) -> str:
 
 def _infer_document_type_from_query(query: str) -> str | None:
     guessed = normalize_document_type(infer_document_type(query))
+    if guessed in {"competition-rules", "event-operation", "judging"}:
+        return guessed
+    if guessed == "safety" and re.search(r"안전\s*규정", query, re.IGNORECASE):
+        return guessed
+    if _VEHICLE_TECHNICAL_QUERY_RE.search(query):
+        return "vehicle-technical"
     return None if guessed == "other" else guessed
 
 

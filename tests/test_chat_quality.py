@@ -237,7 +237,7 @@ def test_bad_rewrite_falls_back_to_previous_user_context(monkeypatch):
     assert "배기 클램프 일반 너트" in rewritten
 
 
-def test_missing_document_type_collection_turns_hard_filter_into_hint(monkeypatch):
+def test_vehicle_component_routes_to_vehicle_technical_rules(monkeypatch):
     vehicle_key = "rules-formula-vehicle-technical-2026"
     vehicle_collection = chat.COLLECTIONS[vehicle_key]
     captured_filters: dict[str, object] = {}
@@ -257,10 +257,31 @@ def test_missing_document_type_collection_turns_hard_filter_into_hint(monkeypatc
 
     _, metadata = chat.search_with_metadata("안전벨트 브라켓 규정", collections=["rules"])
 
-    assert metadata["query_hints"]["document_type"] == "safety"
-    assert metadata["query_hints"]["document_type_filter"] is None
-    assert captured_filters[vehicle_collection] is None
+    assert metadata["query_hints"]["document_type"] == "vehicle-technical"
+    assert metadata["query_hints"]["document_type_filter"] == "vehicle-technical"
+    detail_filter = captured_filters[vehicle_collection]
+    document_condition = next(
+        condition for condition in detail_filter.must or [] if condition.key == "document_type"
+    )
+    assert document_condition.match.value == "vehicle-technical"
     chat._search_cache.clear()
+
+
+def test_explicit_safety_document_stays_a_soft_hint_when_collection_is_missing():
+    vehicle_key = "rules-formula-vehicle-technical-2026"
+
+    assert chat._infer_document_type_from_query("Formula 안전규정") == "safety"
+    assert chat._effective_rules_document_type(
+        "safety",
+        [vehicle_key],
+        "formula",
+        "Formula 안전규정",
+    ) is None
+
+
+def test_vehicle_terms_do_not_override_explicit_event_document_type():
+    assert chat._infer_document_type_from_query("Baja 시트 경기진행규정") == "event-operation"
+    assert chat._infer_document_type_from_query("Baja 시트 등받이 지지 규정") == "vehicle-technical"
 
 
 def test_existing_document_type_collection_keeps_hard_filter(monkeypatch):
