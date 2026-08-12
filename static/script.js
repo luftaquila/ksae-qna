@@ -631,25 +631,117 @@ function renderCollectionChips() {
   if (!host) return;
   host.innerHTML = "";
 
-  for (const c of availableCollections) {
-    const option = document.createElement("span");
-    option.className = "collection-option";
-
-    const label = document.createElement("label");
-    label.className = "collection-chip";
-    label.title = c.description;
-    label.innerHTML =
-      `<input type="checkbox" name="collections" value="${escapeAttr(c.key)}" checked>` +
-      `<span>${escapeHtml(c.label)}</span>`;
-    option.appendChild(label);
-
-    if (c.filter === "category") option.appendChild(buildCategorySelect());
-
-    host.appendChild(option);
-
-    label.querySelector("input").addEventListener("change", syncFilterStates);
+  const [ruleCollections, standardCollections] = splitCollectionsForRender(availableCollections);
+  for (const c of standardCollections) {
+    host.appendChild(buildCollectionChip(c, "checked"));
+    if (c.filter === "category") host.appendChild(buildCategorySelect());
+  }
+  if (ruleCollections.length) {
+    host.appendChild(buildRuleCollectionGroup(ruleCollections));
   }
   syncFilterStates();
+}
+
+function splitCollectionsForRender(collections) {
+  const regular = [];
+  const rules = [];
+  for (const c of collections) {
+    if (isRuleCollection(c)) {
+      rules.push(c);
+      continue;
+    }
+    regular.push(c);
+  }
+  return [rules, regular];
+}
+
+function isRuleCollection(collection) {
+  return collection.source_type === "rules" || collection.key === "rules";
+}
+
+function buildCollectionChip(collection, checked = "checked") {
+  const label = document.createElement("label");
+  label.className = "collection-chip";
+  label.title = collection.description;
+  const checkedAttr = checked ? "checked" : "";
+  label.innerHTML =
+    `<input type="checkbox" name="collections" value="${escapeAttr(collection.key)}" ${checkedAttr}>` +
+    `<span>${escapeHtml(collection.label)}</span>`;
+  const checkbox = label.querySelector("input");
+  checkbox.addEventListener("change", syncFilterStates);
+  return label;
+}
+
+function buildRuleCollectionGroup(ruleCollections) {
+  const master = ruleCollections.find((c) => c.key === "rules") || ruleCollections[0];
+  const detailCandidates = ruleCollections.filter((c) => c.key !== master.key);
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "collection-rule-group";
+
+  const masterChip = buildCollectionChip(master, "checked");
+  wrapper.appendChild(masterChip);
+
+  if (detailCandidates.length === 0) {
+    return wrapper;
+  }
+
+  const detailsWrap = document.createElement("div");
+  detailsWrap.className = "rules-subcollections collapsed";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "rules-detail-toggle";
+  toggle.textContent = "규정 상세 선택";
+  wrapper.appendChild(toggle);
+  wrapper.appendChild(detailsWrap);
+
+  const childCheckboxes = [];
+  const masterCheckbox = masterChip.querySelector("input");
+  masterCheckbox.addEventListener("change", () => {
+    const shouldDisable = masterCheckbox.checked;
+    detailsWrap.classList.add("collapsed");
+    toggle.textContent = shouldDisable ? "규정 상세 선택" : "규정 상세 선택";
+    childCheckboxes.forEach((cb) => {
+      cb.disabled = shouldDisable;
+      if (shouldDisable) {
+        cb.checked = false;
+      }
+    });
+    syncFilterStates();
+  });
+
+  toggle.addEventListener("click", () => {
+    const isCollapsed = detailsWrap.classList.toggle("collapsed");
+    toggle.textContent = isCollapsed ? "규정 상세 선택" : "규정 상세 접기";
+    if (!isCollapsed && masterCheckbox.checked) {
+      masterCheckbox.checked = false;
+      childCheckboxes.forEach((cb) => {
+        cb.disabled = false;
+      });
+      syncFilterStates();
+    }
+  });
+
+  for (const c of detailCandidates) {
+    const chip = buildCollectionChip(c, "");
+    chip.classList.add("collection-chip-child");
+    const checkbox = chip.querySelector("input");
+    checkbox.checked = false;
+    childCheckboxes.push(checkbox);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked && masterCheckbox) {
+        masterCheckbox.checked = false;
+      }
+      syncFilterStates();
+    });
+    detailsWrap.appendChild(chip);
+  }
+
+  if (masterCheckbox.checked) {
+    childCheckboxes.forEach((cb) => (cb.disabled = true));
+  }
+  return wrapper;
 }
 
 function buildCategorySelect() {

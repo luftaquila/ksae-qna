@@ -71,6 +71,7 @@ from src.chat import (
     MODEL_CONFIG,
     PRIMARY_MODEL_KEY,
     PROMPT_VERSION,
+    ALLOWED_COMPETITION_KEYS,
     get_all_models_admin,
     get_health_status,
     init_model_settings,
@@ -371,7 +372,7 @@ async def chat(request: Request, req: ChatRequest):
     invalid_collections = set(req.collections or []) - set(COLLECTION_REGISTRY)
     if invalid_collections:
         return JSONResponse({"error": "지원하지 않는 검색 소스가 포함되어 있습니다"}, status_code=400)
-    if req.competition not in (None, "smart_e_mobility", "e_formula", "formula", "baja", "ev"):
+    if req.competition not in (None, *ALLOWED_COMPETITION_KEYS):
         return JSONResponse({"error": "지원하지 않는 대회 종목입니다"}, status_code=400)
 
     # Validate ownership before charging.  Previously a stale/foreign session
