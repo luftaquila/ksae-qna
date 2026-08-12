@@ -694,7 +694,7 @@ def search_with_metadata(
     filtered_document_type = _effective_rules_document_type(
         detected_document_type,
         valid_keys,
-        detected_competition,
+        filtered_competition,
         search_query,
     )
     metadata: dict[str, Any] = {
@@ -1342,12 +1342,14 @@ def _normalize_rule_query(query: str) -> str:
     # Short workshop-style queries frequently omit the actual concern.  Keep
     # the user's words, but append common equivalent terms so both dense and
     # lexical retrieval can reach the way the corpus phrases the same topic.
-    if "클램프" in text and "일반 너트" in text and "풀림 방지" not in text:
+    if "클램프" in text and ("일반 너트" in text or "노드락" in text) and "풀림 방지" not in text:
         text += " 너트 체결 풀림 방지"
     return text
 
 
 def _infer_document_type_from_query(query: str) -> str | None:
+    if re.search(r"기술\s*부문\s*규정", query, re.IGNORECASE):
+        return "other"
     guessed = normalize_document_type(infer_document_type(query))
     if guessed in {"competition-rules", "event-operation", "judging"}:
         return guessed

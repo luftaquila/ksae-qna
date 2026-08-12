@@ -210,6 +210,13 @@ def test_rule_query_normalizes_workshop_typos_and_spacing():
     assert chat._normalize_rule_query(normalized) == normalized
 
 
+def test_nord_lock_query_adds_fastener_search_terms():
+    normalized = chat._normalize_rule_query("베기 클램프 노드락 체결")
+
+    assert normalized == "배기 클램프 노드락 체결 Nord-Lock 너트 체결 풀림 방지"
+    assert chat._normalize_rule_query(normalized) == normalized
+
+
 def test_rewrite_must_preserve_concrete_korean_terms():
     original = "배기 클램프 일반너트"
 
@@ -337,6 +344,45 @@ def test_smart_e_document_type_filter_uses_internal_competition_key():
         "smart_e_mobility",
         "스마트 e 모빌리티 경기진행규정",
     ) == "event-operation"
+
+
+def test_electric_alias_uses_fallback_family_for_document_filter(monkeypatch):
+    formula_key = "rules-formula-vehicle-technical-2026"
+    smart_e_key = "rules-smart-e-mobility-vehicle-technical-2026"
+    available = {chat.COLLECTIONS[formula_key], chat.COLLECTIONS[smart_e_key]}
+
+    class FakeEmbedding:
+        def encode(self, _query):
+            return SimpleNamespace(tolist=lambda: [1.0])
+
+    def fake_search(*_args, **_kwargs):
+        return []
+
+    chat._search_cache.clear()
+    monkeypatch.setattr(chat, "_model", FakeEmbedding())
+    monkeypatch.setattr(chat, "_search_collection", fake_search)
+    monkeypatch.setattr(chat, "_get_available_collections", lambda: available)
+
+    _, e_formula_meta = chat.search_with_metadata("E-Formula GLVS 장착 위치", collections=["rules"])
+    _, ev_meta = chat.search_with_metadata("EV 방화벽 규정", collections=["rules"])
+
+    assert e_formula_meta["query_hints"]["competition_filter"] == "formula"
+    assert e_formula_meta["query_hints"]["document_type_filter"] == "vehicle-technical"
+    assert ev_meta["query_hints"]["competition_filter"] == "smart_e_mobility"
+    assert ev_meta["query_hints"]["document_type_filter"] == "vehicle-technical"
+    chat._search_cache.clear()
+
+
+def test_technical_division_rules_route_to_explicit_other_document():
+    other_key = "rules-other-other-2026"
+
+    assert chat._infer_document_type_from_query("기술부문규정") == "other"
+    assert chat._effective_rules_document_type(
+        "other",
+        [other_key],
+        None,
+        "기술부문규정",
+    ) == "other"
 
 
 def test_aark_unresolved_is_searched_but_penalized():
