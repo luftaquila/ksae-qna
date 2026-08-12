@@ -155,6 +155,12 @@ test("source selector exposes only broad source groups", async ({ page }) => {
     elements.map((element) => Math.round(element.getBoundingClientRect().top)),
   );
   expect(new Set(chipRows).size).toBe(1);
+
+  const rulesInput = sourceInputs.first();
+  await rulesInput.focus();
+  await expect(rulesInput).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(rulesInput).not.toBeChecked();
 });
 
 test("source selector always keeps at least one source enabled", async ({ page }) => {
