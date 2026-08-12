@@ -66,12 +66,12 @@ from src.auth import (
 )
 from src.chat import (
     CHAT_CREDIT_COST,
-    COLLECTION_REGISTRY,
     FALLBACK_MODEL_KEY,
     MODEL_CONFIG,
     PRIMARY_MODEL_KEY,
     PROMPT_VERSION,
     ALLOWED_COMPETITION_KEYS,
+    get_public_collections,
     get_all_models_admin,
     get_health_status,
     init_model_settings,
@@ -350,12 +350,7 @@ async def sessions_update(session_id: int, body: SessionPatch, request: Request)
 @app.get("/api/collections")
 async def collections_list():
     """검색 소스 목록. 프론트엔드 칩·안내문은 이 응답으로 렌더된다."""
-    return {
-        "collections": [
-            {"key": key, **{k: v for k, v in meta.items() if k != "collection"}}
-            for key, meta in COLLECTION_REGISTRY.items()
-        ]
-    }
+    return {"collections": get_public_collections()}
 
 
 @app.post("/api/chat")
@@ -369,7 +364,10 @@ async def chat(request: Request, req: ChatRequest):
     if not any(is_model_available(key) for key in (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY)):
         return JSONResponse({"error": "답변 모델을 현재 사용할 수 없습니다."}, status_code=503)
 
-    invalid_collections = set(req.collections or []) - set(COLLECTION_REGISTRY)
+    invalid_collections = set()
+    if req.collections:
+        public_collections = {entry["key"] for entry in get_public_collections()}
+        invalid_collections = set(req.collections) - public_collections
     if invalid_collections:
         return JSONResponse({"error": "지원하지 않는 검색 소스가 포함되어 있습니다"}, status_code=400)
     if req.competition not in (None, *ALLOWED_COMPETITION_KEYS):

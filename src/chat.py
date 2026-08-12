@@ -28,6 +28,7 @@ from src.auth import get_model_settings_map, set_model_settings
 from src.rules_registry import (
     COMPETITION_KEYS,
     RULES_COLLECTION_YEAR,
+    normalize_competition_key,
     infer_document_type,
     document_type_label,
     normalize_document_type,
@@ -65,6 +66,7 @@ def _build_collection_registry() -> dict[str, dict]:
             "source_type": "rules",
             "competition": "formula",
             "document_type": "vehicle-technical",
+            "supports_filters": False,
             "year": RULES_COLLECTION_YEAR,
         },
         "qna": {
@@ -97,6 +99,7 @@ def _build_collection_registry() -> dict[str, dict]:
             "competition": info.competition_display,
             "document_type": document_type_label(info.document_type),
             "document_type_key": info.document_type,
+            "supports_filters": True,
             "year": str(info.key.split("-")[-1]),
         }
 
@@ -109,9 +112,88 @@ COLLECTIONS = {key: meta["collection"] for key, meta in COLLECTION_REGISTRY.item
 RULE_COLLECTION_NAMES = tuple(
     meta["collection"]
     for key, meta in COLLECTION_REGISTRY.items()
-    if key == "rules" or meta.get("source_type") == "rules"
+    if meta.get("source_type") == "rules" and meta.get("supports_filters", False)
 )
 CONFIDENCE_LEVELS = ("합의됨", "다수의견", "단일제보", "미해결")
+
+
+def _get_available_collections() -> set[str] | None:
+    """Return currently available vector-collections, or None if unknown."""
+    if _qdrant is None:
+        return None
+    try:
+        response = _qdrant.get_collections()
+        return {col.name for col in response.collections}
+    except Exception:
+        logger.warning("Unable to fetch qdrant collections; using config defaults for registry")
+        return None
+
+
+def _is_active_rule_collection_key(
+    collection_key: str,
+    available_collections: set[str] | None = None,
+) -> bool:
+    """Return True if a rules key is backed by an existing collection."""
+    if collection_key == "rules":
+        return True
+    meta = COLLECTION_REGISTRY.get(collection_key)
+    if not meta or meta.get("source_type") != "rules" or not meta.get("supports_filters", False):
+        return True
+
+    if available_collections is None:
+        available_collections = _get_available_collections()
+    if available_collections is None:
+        return True
+    return meta["collection"] in available_collections
+
+
+def get_public_collections() -> list[dict[str, Any]]:
+    """Return only the rule collections that are available in Qdrant plus stable sources."""
+    available = _get_available_collections()
+    visible: list[dict[str, Any]] = []
+    for key, meta in COLLECTION_REGISTRY.items():
+        if key != "rules" and meta.get("source_type") == "rules":
+            if not _is_active_rule_collection_key(key, available):
+                continue
+        visible.append({"key": key, **{k: v for k, v in meta.items() if k != "collection"}})
+    return visible
+
+
+def expand_collection_keys(
+    collections: list[str] | None,
+    available_collections: set[str] | None = None,
+) -> list[str]:
+    """Expand the master rules chip into available rule collections."""
+    expanded: list[str] = []
+    if not collections:
+        if available_collections is None:
+            available_collections = _get_available_collections()
+        return [key for key in COLLECTIONS if _is_active_rule_collection_key(key, available_collections)]
+
+    if available_collections is None:
+        available_collections = _get_available_collections()
+
+    for key in collections:
+        if key == "rules":
+            expanded.append("rules")
+            for detail_key, detail_meta in COLLECTION_REGISTRY.items():
+                if detail_key == "rules":
+                    continue
+                if detail_meta.get("source_type") != "rules" or not detail_meta.get("supports_filters", False):
+                    continue
+                if available_collections is not None and detail_meta["collection"] not in available_collections:
+                    continue
+                if detail_key not in expanded:
+                    expanded.append(detail_key)
+            continue
+
+        if key in expanded:
+            continue
+        if not _is_active_rule_collection_key(key, available_collections):
+            continue
+        expanded.append(key)
+
+    return [key for key in expanded if key == "rules" or _is_active_rule_collection_key(key, available_collections)]
 
 # 같은 소주제(section)에서 올라오는 청크 상한. AARK는 항목 하나가 곧 post_id라
 # MAX_CHUNKS_PER_POST 가 사실상 동작하지 않아 별도 상한이 필요하다.
@@ -592,10 +674,17 @@ def search_with_metadata(
     """
     # ``confidence`` is retained only for backward-compatible callers. AARK
     # retrieval always searches every confidence level.
-    del min_per_collection, confidence
+    requested_confidence = confidence or []
+    del min_per_collection
+    available_collections = _get_available_collections()
     if not collections:
-        collections = list(COLLECTIONS.keys())
-    valid_keys = [key for key in collections if key in COLLECTIONS]
+        valid_keys = [key for key in COLLECTIONS if _is_active_rule_collection_key(key, available_collections)]
+    else:
+        valid_keys = [
+            key
+            for key in expand_collection_keys(collections, available_collections)
+            if key in COLLECTIONS
+        ]
     collection_names = [COLLECTIONS[key] for key in valid_keys]
 
     search_query = _normalize_rule_query(query)
@@ -617,10 +706,7 @@ def search_with_metadata(
 
     candidate_limit = max(limit * 4, 24)
     cache_key = hashlib.sha256(
-        f"{search_query}|{candidate_limit}|{min_score}|{','.join(sorted(valid_keys))}"
-        f"|{category}|{','.join(sorted(confidence or []))}".encode()
-        f"{search_query}|{candidate_limit}|{min_score}|{','.join(sorted(valid_keys))}"
-        f"|{category}|{','.join(sorted(confidence or []))}".encode()
+        f"{search_query}|{candidate_limit}|{min_score}|{','.join(sorted(valid_keys))}|{category}|{','.join(sorted(requested_confidence))}".encode()
     ).hexdigest()
     now = time.monotonic()
     cached = _search_cache.get(cache_key)
@@ -1215,7 +1301,10 @@ def _source_matches_competition(source: dict, competition: str | None) -> bool:
     if source_competition is None:
         text = f"{source.get('source', '')}\n{source.get('content', '')[:1200]}"
         source_competition = _detect_competition(text)
-    return source_competition is None or source_competition == competition
+    source_competition_key = (
+        normalize_competition_key(source_competition) if source_competition else None
+    )
+    return source_competition_key is None or source_competition_key == "other" or source_competition_key == competition
 
 
 def _build_rules_filter(competition: str | None, document_type: str | None) -> models.Filter | None:
