@@ -1309,7 +1309,14 @@ def _source_matches_competition(source: dict, competition: str | None) -> bool:
 def _build_rules_filter(competition: str | None, document_type: str | None) -> models.Filter | None:
     conditions: list[Any] = []
     if competition:
-        conditions.append(models.FieldCondition(key="competition", match=models.MatchValue(value=competition)))
+        normalized_competition = normalize_competition_key(competition)
+        competition_values = (normalized_competition, "other") if normalized_competition != "other" else ("other",)
+        conditions.append(
+            models.FieldCondition(
+                key="competition",
+                match=models.MatchAny(any=list(competition_values)),
+            )
+        )
     if document_type:
         conditions.append(models.FieldCondition(key="document_type", match=models.MatchValue(value=document_type)))
     if not conditions:

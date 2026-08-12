@@ -42,6 +42,25 @@ def test_other_competition_is_treated_as_global_rule_source():
     assert chat._source_matches_competition({"competition": "baja"}, "formula") is False
 
 
+def test_build_rules_filter_includes_other_competition():
+    filters = chat._build_rules_filter("formula", "event-operation")
+    assert filters is not None
+    competition_condition = next(condition for condition in filters.must or [] if condition.key == "competition")
+    document_type_condition = next(condition for condition in filters.must or [] if condition.key == "document_type")
+    assert isinstance(competition_condition.match, chat.models.MatchAny)
+    assert set(competition_condition.match.any) == {"formula", "other"}
+    assert isinstance(document_type_condition.match, chat.models.MatchValue)
+    assert document_type_condition.match.value == "event-operation"
+
+
+def test_build_rules_filter_keeps_other_as_only_competition_value():
+    filters = chat._build_rules_filter("other", "vehicle-technical")
+    assert filters is not None
+    competition_condition = filters.must[0]
+    assert isinstance(competition_condition.match, chat.models.MatchValue)
+    assert competition_condition.match.value == "other"
+
+
 def test_master_rules_chip_expands_only_to_available_detail_collections(monkeypatch):
     available_detail = "ksae-rules-formula-event-operation-2026-v2"
     expected_formula_detail = "rules-formula-event-operation-2026"

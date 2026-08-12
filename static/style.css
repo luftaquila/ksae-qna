@@ -774,26 +774,6 @@ header {
   cursor: pointer;
 }
 
-.collection-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px 9px;
-  cursor: pointer;
-  font-weight: 600;
-  user-select: none;
-}
-
-.collection-chip input { position: absolute; opacity: 0; pointer-events: none; }
-
-.collection-chip:has(input:checked) {
-  border-color: #bfdbfe;
-  color: #1d4ed8;
-  background: var(--color-primary-soft);
-}
-
-[data-theme="dark"] .collection-chip:has(input:checked) { color: #bfdbfe; border-color: #1e40af; }
-
 .category-select:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .input-row {
