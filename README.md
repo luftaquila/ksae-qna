@@ -116,6 +116,33 @@ python main.py kb-upload --recreate
 AARK는 신뢰도 필터 없이 전체 내용을 검색하며, 신뢰도는 합의 수준 표시에만 사용합니다.
 Q&A는 실제 `[답변]`이 있는 청크만 생성 근거에 포함합니다.
 
+### Formula 2026 규정(2026)
+
+`rules` 명령은 PDF `Formula 차량기술규정(2026)`를 청킹 → 임베딩 → 업로드까지 한 번에 처리합니다.
+기존 Q&A/KB와 같은 임베딩/업로드 스테이지를 재사용하지만, 청크 패스/페이로드만 다릅니다.
+
+```sh
+python main.py rules --source data/raw/formula-2026-2026.pdf --rules-collection ksae-formula-rules-reembed --recreate
+python main.py rules-embed
+python main.py rules-upload --rules-collection ksae-formula-rules-reembed --recreate
+```
+
+```sh
+# 2026년 J_rule 전체 규정(차량기술/경기진행/심사/안전 등) 재수집 + 분류 + 적재
+python main.py rules-2026 --year 2026 --recreate
+```
+
+개별 단계 실행:
+
+```sh
+python main.py rules-2026-crawl --year 2026   # J_rule 크롤링 + PDF 다운로드
+python main.py rules-2026-chunk --year 2026   # 2026 규정 청크 생성
+python main.py rules-2026-embed --year 2026   # 분류 컬렉션별 임베딩
+python main.py rules-2026-upload --year 2026 --recreate  # 분류 컬렉션별 업로드
+```
+
+규정 임베딩 생성·비교 방법은 `docs/rules-embedding-workflow.md` 를 참고하세요.
+
 ## MCP 서버
 
 Claude Desktop 등 MCP를 지원하는 AI 클라이언트에서 벡터 DB를 직접 검색할 수 있습니다.

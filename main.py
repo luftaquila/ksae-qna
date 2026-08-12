@@ -7,8 +7,10 @@ or individual stages independently.
 from __future__ import annotations
 
 import logging
+import json
 import sys
 import time
+from pathlib import Path
 
 import click
 
@@ -195,6 +197,123 @@ KB_PAYLOAD_FIELDS = ("source_type", "source_version", "chapter_num", "chapter",
 KB_INDEX_FIELDS = ("chapter", "confidence", "kind")
 
 
+# ---------------------------------------------------------------------------
+# Formula 2026 규정집 — PDF 원문 기반 파이프라인.
+# ---------------------------------------------------------------------------
+
+RULES_SOURCE = "data/raw/formula-2026-2026.pdf"
+RULES_CHUNKS = "data/processed/rules_chunks.json"
+RULES_EMBEDDINGS = "data/processed/rules_embeddings.npy"
+RULES_COLLECTION = "ksae-formula-rules-reembed"
+RULES_PAYLOAD_FIELDS = ("chapter", "chapter_num", "section", "section_num")
+RULES_INDEX_FIELDS = ("chapter", "chapter_num", "section")
+RULES_2026_YEAR = "2026"
+RULES_2026_MANIFEST = "data/raw/rules-2026/rules-2026-manifest.json"
+RULES_2026_RAW_DIR = "data/raw/rules-2026"
+RULES_2026_CHUNKS_ALL = "data/processed/rules-2026/rules-2026-all-chunks.json"
+RULES_2026_CHUNKS_DIR = "data/processed/rules-2026/chunks"
+RULES_2026_EMB_DIR = "data/processed/rules-2026/embeddings"
+RULES_2026_PAYLOAD_FIELDS = (
+    "source_type",
+    "source_version",
+    "source_post_id",
+    "source_key",
+    "source_file",
+    "source_filename",
+    "source_url",
+    "source_title",
+    "competition",
+    "document_type",
+    "year",
+    "chapter",
+    "chapter_num",
+    "section",
+    "section_num",
+)
+RULES_2026_INDEX_FIELDS = (
+    "competition",
+    "document_type",
+    "year",
+    "source_post_id",
+    "source_filename",
+    "source_key",
+    "chapter",
+    "section",
+)
+
+
+def _resolve_rules_2026_collections(year: str, requested: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    from src.rules_registry import rules_collection_registry
+
+    registry = rules_collection_registry(year=year)
+    available = sorted(registry)
+    if not requested:
+        return available
+
+    requested_set = set(requested)
+    unknown = requested_set - set(available)
+    if unknown:
+        raise ValueError(f"Unknown rules collections: {', '.join(sorted(unknown))}")
+    return sorted(requested_set)
+
+
+def _rules_2026_bucket_file(collection_key: str, folder: str = RULES_2026_CHUNKS_DIR) -> str:
+    return str(Path(folder) / f"{collection_key}.json")
+
+
+def _rules_2026_embedding_file(collection_key: str, folder: str = RULES_2026_EMB_DIR) -> str:
+    return str(Path(folder) / f"{collection_key}.npy")
+
+
+def _split_rules_2026_chunks(
+    chunks_path: str = RULES_2026_CHUNKS_ALL,
+    year: str = RULES_2026_YEAR,
+    only_collections: set[str] | None = None,
+) -> list[str]:
+    """Split a combined chunk file into collection bucket chunk files."""
+    from src.rules_registry import build_collection_key, normalize_competition_key, normalize_document_type
+
+    with open(chunks_path, "r", encoding="utf-8") as f:
+        chunks = json.load(f)
+
+    buckets: dict[str, list[dict[str, object]]] = {}
+    for chunk in chunks:
+        if str(chunk.get("year", year)) != str(year):
+            continue
+        competition = normalize_competition_key(chunk.get("competition") or "")
+        document_type = normalize_document_type(chunk.get("document_type") or "")
+        key = build_collection_key(competition, document_type, year)
+        if only_collections is not None and key not in only_collections:
+            continue
+        buckets.setdefault(key, []).append(chunk)
+
+    paths: list[str] = []
+    Path(RULES_2026_CHUNKS_DIR).mkdir(parents=True, exist_ok=True)
+    for key in sorted(buckets):
+        bucket_path = _rules_2026_bucket_file(key)
+        buckets[key].sort(
+            key=lambda c: (
+                str(c.get("source_key", "")),
+                int(c.get("chunk_index", 0) or 0),
+            )
+        )
+        with open(bucket_path, "w", encoding="utf-8") as f:
+            json.dump(buckets[key], f, ensure_ascii=False, indent=2)
+        paths.append(bucket_path)
+
+    # Remove stale bucket files for explicitly selected collections so a missing bucket
+    # does not reuse an old artifact in subsequent uploads.
+    if only_collections is not None:
+        for key in sorted(only_collections):
+            if key in buckets:
+                continue
+            stale_bucket_path = _rules_2026_bucket_file(key)
+            if Path(stale_bucket_path).exists():
+                Path(stale_bucket_path).unlink()
+
+    return paths
+
+
 def _kb_upload(ctx: click.Context, collection: str, recreate: bool) -> None:
     """Run the KB upload stage with the knowledge base payload schema."""
     from src.uploader import upload_to_qdrant
@@ -262,6 +381,277 @@ def kb_embed(ctx: click.Context) -> None:
 def kb_upload(ctx: click.Context, kb_collection: str, recreate: bool) -> None:
     """Run the knowledge base upload stage."""
     _kb_upload(ctx, kb_collection, recreate)
+
+
+def _rules_upload(ctx: click.Context, rules_collection: str, recreate: bool) -> None:
+    """Run the rules upload stage with the formula rules payload schema."""
+    from src.uploader import upload_to_qdrant
+
+    _run_stage(
+        "rules-upload", upload_to_qdrant,
+        chunks_path=RULES_CHUNKS,
+        embeddings_path=RULES_EMBEDDINGS,
+        qdrant_url=ctx.obj["qdrant_url"],
+        api_key=ctx.obj["qdrant_api_key"],
+        collection_name=rules_collection,
+        recreate=recreate,
+        payload_fields=RULES_PAYLOAD_FIELDS,
+        index_fields=RULES_INDEX_FIELDS,
+        prune=True,
+    )
+
+
+@cli.command()
+@click.option("--source", default=RULES_SOURCE, help="Formula 규정 PDF 또는 텍스트 경로.")
+@click.option("--rules-collection", default=RULES_COLLECTION, help="Qdrant collection for formula rules.")
+@click.option("--recreate", is_flag=True, default=False, help="Delete and recreate the collection before uploading.")
+@click.pass_context
+def rules(ctx: click.Context, source: str, rules_collection: str, recreate: bool) -> None:
+    """Run Formula 규정 파이프라인 (chunk -> embed -> upload)."""
+    from src.embedder import embed_chunks
+    from src.rules_chunker import chunk_rules
+
+    total_start = time.time()
+    click.echo(f"Running rules pipeline: chunk -> embed -> upload ({source} -> {rules_collection})")
+
+    _run_stage("rules-chunk", chunk_rules, input_path=source, output_path=RULES_CHUNKS)
+    _run_stage("rules-embed", embed_chunks, input_path=RULES_CHUNKS, output_path=RULES_EMBEDDINGS,
+               batch_size=ctx.obj["batch_size"], embed_url=ctx.obj["embed_url"])
+    _rules_upload(ctx, rules_collection, recreate)
+
+    elapsed = time.time() - total_start
+    click.echo(f"Rules pipeline completed in {elapsed:.1f}s")
+
+
+@cli.command("rules-chunk")
+@click.option("--source", default=RULES_SOURCE, help="Formula 규정 PDF 또는 텍스트 경로.")
+@click.pass_context
+def rules_chunk(ctx: click.Context, source: str) -> None:
+    """Run the rules chunk stage."""
+    from src.rules_chunker import chunk_rules
+
+    _run_stage("rules-chunk", chunk_rules, input_path=source, output_path=RULES_CHUNKS)
+
+
+@cli.command("rules-embed")
+@click.pass_context
+def rules_embed(ctx: click.Context) -> None:
+    """Run the rules embed stage."""
+    from src.embedder import embed_chunks
+
+    _run_stage("rules-embed", embed_chunks, input_path=RULES_CHUNKS, output_path=RULES_EMBEDDINGS,
+               batch_size=ctx.obj["batch_size"], embed_url=ctx.obj["embed_url"])
+
+
+@cli.command("rules-upload")
+@click.option("--rules-collection", default=RULES_COLLECTION, help="Qdrant collection for formula rules.")
+@click.option("--recreate", is_flag=True, default=False, help="Delete and recreate the collection before uploading.")
+@click.pass_context
+def rules_upload(ctx: click.Context, rules_collection: str, recreate: bool) -> None:
+    """Run the rules upload stage."""
+    _rules_upload(ctx, rules_collection, recreate)
+
+
+@cli.command("rules-2026-crawl")
+@click.option("--year", default=RULES_2026_YEAR, help="년도(예: 2026).")
+@click.option("--manifest", default=RULES_2026_MANIFEST, help="크롤링 메니페스트 저장 경로.")
+@click.option("--raw-dir", default=RULES_2026_RAW_DIR, help="PDF 저장 디렉터리.")
+@click.pass_context
+def rules_2026_crawl(ctx: click.Context, year: str, manifest: str, raw_dir: str) -> None:
+    """Crawl J_rule and download 2026 rule PDFs."""
+    from src.rules_crawler import crawl_rules_list_pages, download_rules_pdfs, save_manifest
+
+    delay: float = ctx.obj["delay"]
+    start = time.time()
+
+    manifest_items = crawl_rules_list_pages(delay=delay, year=year)
+    manifest_items = download_rules_pdfs(manifest_items, raw_dir=raw_dir, delay=delay)
+    save_manifest(manifest_items, manifest)
+
+    elapsed = time.time() - start
+    logger.info("rules-2026-crawl completed in %.1fs", elapsed)
+    print(f"rules-2026-crawl completed in {elapsed:.1f}s")
+
+
+@cli.command("rules-2026-chunk")
+@click.option("--manifest", default=RULES_2026_MANIFEST, help="크롤링 메니페스트 경로.")
+@click.option("--year", default=RULES_2026_YEAR, help="년도(예: 2026).")
+@click.option("--output", default=RULES_2026_CHUNKS_ALL, help="통합 청크 저장 경로.")
+@click.pass_context
+def rules_2026_chunk(ctx: click.Context, manifest: str, year: str, output: str) -> None:
+    """Chunk 2026 규정 manifest to one normalized chunk file."""
+    from src.rules_chunker import chunk_rules_manifest
+
+    _run_stage("rules-2026-chunk", chunk_rules_manifest, manifest_path=manifest, output_path=output, year=year)
+
+
+@cli.command("rules-2026-embed")
+@click.option("--chunks", default=RULES_2026_CHUNKS_ALL, help="통합 청크 경로.")
+@click.option("--year", default=RULES_2026_YEAR, help="년도(예: 2026).")
+@click.option("--collection", "collections", multiple=True, help="대상 collection 키(반복 가능). 생략 시 전체 업로드.")
+@click.pass_context
+def rules_2026_embed(ctx: click.Context, chunks: str, year: str, collections: list[str]) -> None:
+    """Embed all buckets of the selected 2026 규정 collections."""
+    from src.embedder import embed_chunks
+
+    try:
+        selected_keys = _resolve_rules_2026_collections(year=year, requested=collections)
+    except ValueError as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        ctx.exit(1)
+
+    # Split/overwrite per-collection chunk files first.
+    _run_stage("rules-2026-split", _split_rules_2026_chunks, chunks_path=chunks, year=year, only_collections=set(selected_keys))
+
+    batch_size: int = ctx.obj["batch_size"]
+    embed_url: str | None = ctx.obj["embed_url"]
+    for collection_key in selected_keys:
+        bucket_path = _rules_2026_bucket_file(collection_key)
+        if not Path(bucket_path).exists():
+            click.echo(f"No chunks for {collection_key}, skip embedding")
+            continue
+
+        embedding_path = _rules_2026_embedding_file(collection_key)
+        _run_stage(
+            f"rules-2026-embed:{collection_key}",
+            embed_chunks,
+            input_path=bucket_path,
+            output_path=embedding_path,
+            batch_size=batch_size,
+            embed_url=embed_url,
+        )
+
+
+@cli.command("rules-2026-upload")
+@click.option("--year", default=RULES_2026_YEAR, help="년도(예: 2026).")
+@click.option("--chunks", default=RULES_2026_CHUNKS_ALL, help="통합 청크 경로.")
+@click.option("--collection", "collections", multiple=True, help="대상 collection 키(반복 가능). 생략 시 전체 업로드.")
+@click.option("--recreate", is_flag=True, default=False, help="컬렉션 재생성 후 업로드.")
+@click.pass_context
+def rules_2026_upload(ctx: click.Context, year: str, chunks: str, collections: list[str], recreate: bool) -> None:
+    """Upload selected 2026 규정 collection buckets to Qdrant."""
+    from src.uploader import upload_to_qdrant
+    from src.rules_registry import rules_collection_registry
+
+    try:
+        selected_keys = _resolve_rules_2026_collections(year=year, requested=collections)
+    except ValueError as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        ctx.exit(1)
+
+    # Ensure bucketed chunk files exist for requested collections.
+    _run_stage("rules-2026-split", _split_rules_2026_chunks, chunks_path=chunks, year=year, only_collections=set(selected_keys))
+
+    registry = rules_collection_registry(year=year)
+    qdrant_url: str = ctx.obj["qdrant_url"]
+    qdrant_api_key: str | None = ctx.obj["qdrant_api_key"]
+
+    for collection_key in selected_keys:
+        info = registry.get(collection_key)
+        if not info:
+            continue
+
+        bucket_path = _rules_2026_bucket_file(collection_key)
+        embedding_path = _rules_2026_embedding_file(collection_key)
+        if not Path(bucket_path).exists():
+            click.echo(f"No chunks for {collection_key}, skip upload")
+            continue
+
+        _run_stage(
+            f"rules-2026-upload:{collection_key}",
+            upload_to_qdrant,
+            chunks_path=bucket_path,
+            embeddings_path=embedding_path,
+            qdrant_url=qdrant_url,
+            api_key=qdrant_api_key,
+            collection_name=info.collection,
+            recreate=recreate,
+            payload_fields=RULES_2026_PAYLOAD_FIELDS,
+            index_fields=RULES_2026_INDEX_FIELDS,
+            prune=True,
+        )
+
+
+@cli.command("rules-2026")
+@click.option("--year", default=RULES_2026_YEAR, help="년도(예: 2026).")
+@click.option("--manifest", default=RULES_2026_MANIFEST, help="크롤링 메니페스트 경로.")
+@click.option("--raw-dir", default=RULES_2026_RAW_DIR, help="PDF 저장 디렉터리.")
+@click.option("--chunks", default=RULES_2026_CHUNKS_ALL, help="통합 청크 저장 경로.")
+@click.option("--collection", "collections", multiple=True, help="업로드할 collection 키(반복 가능). 생략 시 전체 업로드.")
+@click.option("--recreate", is_flag=True, default=False, help="컬렉션 재생성 후 업로드.")
+@click.pass_context
+def rules_2026(ctx: click.Context, year: str, manifest: str, raw_dir: str, chunks: str, collections: list[str], recreate: bool) -> None:
+    """Crawl -> download -> chunk -> embed -> upload for all 2026 규정 documents."""
+    from src.embedder import embed_chunks
+    from src.rules_crawler import crawl_rules_list_pages, download_rules_pdfs, save_manifest
+    from src.rules_chunker import chunk_rules_manifest
+    from src.uploader import upload_to_qdrant
+    from src.rules_registry import rules_collection_registry
+
+    total_start = time.time()
+    delay: float = ctx.obj["delay"]
+    batch_size: int = ctx.obj["batch_size"]
+    embed_url: str | None = ctx.obj["embed_url"]
+    qdrant_url: str = ctx.obj["qdrant_url"]
+    qdrant_api_key: str | None = ctx.obj["qdrant_api_key"]
+
+    try:
+        selected_keys = _resolve_rules_2026_collections(year=year, requested=collections)
+    except ValueError as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        ctx.exit(1)
+
+    manifest_items = crawl_rules_list_pages(delay=delay, year=year)
+    manifest_items = download_rules_pdfs(manifest_items, raw_dir=raw_dir, delay=delay)
+    save_manifest(manifest_items, manifest)
+    print(f"Crawled+downloaded {len(manifest_items)} PDF entries")
+
+    _run_stage(
+        "rules-2026-chunk",
+        chunk_rules_manifest,
+        manifest_path=manifest,
+        output_path=chunks,
+        year=year,
+    )
+
+    _run_stage("rules-2026-split", _split_rules_2026_chunks, chunks_path=chunks, year=year, only_collections=set(selected_keys))
+
+    registry = rules_collection_registry(year=year)
+    for collection_key in selected_keys:
+        info = registry.get(collection_key)
+        if not info:
+            continue
+
+        bucket_path = _rules_2026_bucket_file(collection_key)
+        if not Path(bucket_path).exists():
+            click.echo(f"No chunks for {collection_key}, skip")
+            continue
+
+        embedding_path = _rules_2026_embedding_file(collection_key)
+        _run_stage(
+            f"rules-2026-embed:{collection_key}",
+            embed_chunks,
+            input_path=bucket_path,
+            output_path=embedding_path,
+            batch_size=batch_size,
+            embed_url=embed_url,
+        )
+        _run_stage(
+            f"rules-2026-upload:{collection_key}",
+            upload_to_qdrant,
+            chunks_path=bucket_path,
+            embeddings_path=embedding_path,
+            qdrant_url=qdrant_url,
+            api_key=qdrant_api_key,
+            collection_name=info.collection,
+            payload_fields=RULES_2026_PAYLOAD_FIELDS,
+            index_fields=RULES_2026_INDEX_FIELDS,
+            recreate=recreate,
+            prune=True,
+        )
+
+    elapsed = time.time() - total_start
+    click.echo(f"rules-2026 pipeline completed in {elapsed:.1f}s")
 
 
 if __name__ == "__main__":

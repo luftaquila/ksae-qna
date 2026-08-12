@@ -19,3 +19,21 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Run tests
         run: python -m pytest -q
+
+  ui-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run UI regression tests
+        run: >-
+          npx playwright test tests/ui/chat.spec.js
+          --grep "collection chips keep their width when toggled|AARK always searches every confidence level|chat keeps the original welcome copy|mobile welcome notice is not clipped|chat does not overflow"

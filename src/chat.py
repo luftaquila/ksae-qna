@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import unicodedata
 import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
@@ -24,6 +25,15 @@ from qdrant_client import QdrantClient, models
 from sentence_transformers import SentenceTransformer
 
 from src.auth import get_model_settings_map, set_model_settings
+from src.rules_registry import (
+    COMPETITION_KEYS,
+    RULES_COLLECTION_YEAR,
+    normalize_competition_key,
+    infer_document_type,
+    document_type_label,
+    normalize_document_type,
+    rules_collection_registry,
+)
 
 # Globals initialized once at server startup
 _model: SentenceTransformer | None = None
@@ -44,29 +54,143 @@ EMBEDDING_MODEL = "BAAI/bge-m3"
 # 검색 소스 레지스트리 — 컬렉션을 추가할 때 고쳐야 하는 유일한 곳.
 # 프론트엔드 칩과 안내문은 /api/collections 로 이 값을 받아 렌더한다.
 # 순서가 곧 UI 칩 순서다.
-COLLECTION_REGISTRY: dict[str, dict] = {
-    "rules": {
-        "collection": "ksae-formula-rules",
-        "label": "규정",
-        "description": "대회 규정집 (2026 Formula)",
-        "authority": "공식",
-    },
-    "qna": {
-        "collection": "ksae-qna",
-        "label": "Q&A",
-        "description": "KSAE Q&A 게시판 — 운영진 질의응답",
-        "authority": "공식 해석",
-        "filter": "category",
-    },
-    "kb": {
-        "collection": "ksae-aark-kb",
-        "label": "AARK",
+
+
+def _build_collection_registry() -> dict[str, dict]:
+    registry: dict[str, dict] = {
+        "rules": {
+            "collection": "ksae-formula-rules",
+            "label": "규정",
+            "description": "대회 규정집 (2026 Formula)",
+            "authority": "공식",
+            "source_type": "rules",
+            "competition": "formula",
+            "document_type": "vehicle-technical",
+            "supports_filters": False,
+            "year": RULES_COLLECTION_YEAR,
+        },
+        "qna": {
+            "collection": "ksae-qna",
+            "label": "Q&A",
+            "description": "KSAE Q&A 게시판 — 운영진 질의응답",
+            "authority": "공식 해석",
+            "filter": "category",
+            "source_type": "qna",
+            "year": "",
+        },
+        "kb": {
+            "collection": "ksae-aark-kb",
+            "label": "AARK",
         "description": "참가팀 익명 단톡방 지식베이스 (2025-02 ~ 2026-08)",
         "authority": "경험담",
+        "source_type": "aark",
+        "year": "",
     },
-}
+    }
 
+    for info in rules_collection_registry(year=RULES_COLLECTION_YEAR).values():
+        registry[info.key] = {
+            "collection": info.collection,
+            "label": info.label,
+            "description": info.description,
+            "authority": "공식",
+            "source_type": "rules",
+            "competition": info.competition_display,
+            "document_type": document_type_label(info.document_type),
+            "document_type_key": info.document_type,
+            "supports_filters": True,
+            "year": str(info.key.split("-")[-1]),
+        }
+
+    return registry
+
+
+COLLECTION_REGISTRY: dict[str, dict] = _build_collection_registry()
+ALLOWED_COMPETITION_KEYS = tuple(COMPETITION_KEYS)
 COLLECTIONS = {key: meta["collection"] for key, meta in COLLECTION_REGISTRY.items()}
+RULE_COLLECTION_NAMES = tuple(
+    meta["collection"]
+    for key, meta in COLLECTION_REGISTRY.items()
+    if meta.get("source_type") == "rules" and meta.get("supports_filters", False)
+)
+CONFIDENCE_LEVELS = ("합의됨", "다수의견", "단일제보", "미해결")
+
+
+def _get_available_collections() -> set[str]:
+    """Return available vector collections, defaulting safely to none."""
+    if _qdrant is None:
+        return set()
+    try:
+        response = _qdrant.get_collections()
+        return {col.name for col in response.collections}
+    except Exception:
+        logger.warning("Unable to fetch qdrant collections; exposing stable sources only")
+        return set()
+
+
+def _is_active_rule_collection_key(
+    collection_key: str,
+    available_collections: set[str] | None = None,
+) -> bool:
+    """Return True if a rules key is backed by an existing collection."""
+    if collection_key == "rules":
+        return True
+    meta = COLLECTION_REGISTRY.get(collection_key)
+    if not meta or meta.get("source_type") != "rules" or not meta.get("supports_filters", False):
+        return True
+
+    if available_collections is None:
+        available_collections = _get_available_collections()
+    return meta["collection"] in available_collections
+
+
+def get_public_collections() -> list[dict[str, Any]]:
+    """Return only the rule collections that are available in Qdrant plus stable sources."""
+    available = _get_available_collections()
+    visible: list[dict[str, Any]] = []
+    for key, meta in COLLECTION_REGISTRY.items():
+        if key != "rules" and meta.get("source_type") == "rules":
+            if not _is_active_rule_collection_key(key, available):
+                continue
+        visible.append({"key": key, **{k: v for k, v in meta.items() if k != "collection"}})
+    return visible
+
+
+def expand_collection_keys(
+    collections: list[str] | None,
+    available_collections: set[str] | None = None,
+) -> list[str]:
+    """Expand the master rules chip into available rule collections."""
+    expanded: list[str] = []
+    if not collections:
+        if available_collections is None:
+            available_collections = _get_available_collections()
+        return [key for key in COLLECTIONS if _is_active_rule_collection_key(key, available_collections)]
+
+    if available_collections is None:
+        available_collections = _get_available_collections()
+
+    for key in collections:
+        if key == "rules":
+            expanded.append("rules")
+            for detail_key, detail_meta in COLLECTION_REGISTRY.items():
+                if detail_key == "rules":
+                    continue
+                if detail_meta.get("source_type") != "rules" or not detail_meta.get("supports_filters", False):
+                    continue
+                if available_collections is not None and detail_meta["collection"] not in available_collections:
+                    continue
+                if detail_key not in expanded:
+                    expanded.append(detail_key)
+            continue
+
+        if key in expanded:
+            continue
+        if not _is_active_rule_collection_key(key, available_collections):
+            continue
+        expanded.append(key)
+
+    return [key for key in expanded if key == "rules" or _is_active_rule_collection_key(key, available_collections)]
 
 # 같은 소주제(section)에서 올라오는 청크 상한. AARK는 항목 하나가 곧 post_id라
 # MAX_CHUNKS_PER_POST 가 사실상 동작하지 않아 별도 상한이 필요하다.
@@ -216,10 +340,23 @@ def check_qdrant_health() -> bool:
             return False
         response = _qdrant.get_collections()
         available = {collection.name for collection in response.collections}
-        return set(COLLECTIONS.values()).issubset(available)
+        required = {
+            COLLECTIONS["qna"],
+            COLLECTIONS["kb"],
+        }
+        has_formula_rules = COLLECTIONS["rules"] in available
+        has_rules_2026 = _candidate_rules_collections(available)
+        return required.issubset(available) and (has_formula_rules or has_rules_2026)
     except Exception:
         logger.exception("Qdrant health check failed")
         return False
+
+
+def _candidate_rules_collections(available_collections: set[str]) -> bool:
+    for info in rules_collection_registry(year=RULES_COLLECTION_YEAR).values():
+        if info.collection in available_collections:
+            return True
+    return False
 
 
 def get_health_status(include_errors: bool = False) -> dict[str, Any]:
@@ -439,6 +576,19 @@ def _search_collection(
                     path.append(payload[key])
             source = f"[{label}] " + " > ".join(p for p in path if p)
             url = ""
+        elif payload.get("source_type") == "rules":
+            competition = payload.get("competition") or ""
+            dt = payload.get("document_type") or ""
+            document_type_label = payload.get("document_type_label") or dt
+            if document_type_label and dt:
+                document_type_label = f"({document_type_label})"
+            source_title = payload.get("source_title") or payload.get("source_filename") or payload.get("source_key") or ""
+            source = f"[규정{document_type_label}]"
+            if competition:
+                source += f"/{competition}"
+            if source_title:
+                source += f" {source_title}"
+            url = payload.get("source_url", "")
         elif "title" in payload:
             category = payload.get("category") or ""
             source = f"[{category}] {payload['title']}" if category else payload["title"]
@@ -476,10 +626,28 @@ def _search_collection(
             hit_item["section"] = payload["section"]
         if payload.get("chapter"):
             hit_item["chapter"] = payload["chapter"]
-        if payload.get("category"):
-            hit_item["category"] = payload["category"]
+        if payload.get("source_type"):
+            hit_item["source_type"] = payload["source_type"]
+        if payload.get("source_title"):
+            hit_item["source_title"] = payload["source_title"]
+        if payload.get("source_filename"):
+            hit_item["source_filename"] = payload["source_filename"]
+        if payload.get("source_file"):
+            hit_item["source_file"] = payload["source_file"]
+        if payload.get("source_url"):
+            hit_item["source_url"] = payload["source_url"]
+        if payload.get("source_post_id"):
+            hit_item["source_post_id"] = payload["source_post_id"]
+        if payload.get("source_version"):
+            hit_item["source_version"] = payload["source_version"]
         if payload.get("competition"):
             hit_item["competition"] = payload["competition"]
+        if payload.get("document_type"):
+            hit_item["document_type"] = payload["document_type"]
+        if payload.get("document_type_label"):
+            hit_item["document_type_label"] = payload["document_type_label"]
+        if payload.get("category"):
+            hit_item["category"] = payload["category"]
         hits.append(hit_item)
 
     hits.sort(key=lambda x: x["score"], reverse=True)
@@ -503,15 +671,30 @@ def search_with_metadata(
     """
     # ``confidence`` is retained only for backward-compatible callers. AARK
     # retrieval always searches every confidence level.
-    del min_per_collection, confidence
+    requested_confidence = confidence or []
+    del min_per_collection
+    available_collections = _get_available_collections()
     if not collections:
-        collections = list(COLLECTIONS.keys())
-    valid_keys = [key for key in collections if key in COLLECTIONS]
+        valid_keys = [key for key in COLLECTIONS if _is_active_rule_collection_key(key, available_collections)]
+    else:
+        valid_keys = [
+            key
+            for key in expand_collection_keys(collections, available_collections)
+            if key in COLLECTIONS
+        ]
     collection_names = [COLLECTIONS[key] for key in valid_keys]
+
+    search_query = _normalize_rule_query(query)
+    detected_competition = _detect_competition(search_query) or _detect_competition(query)
+    detected_document_type = _infer_document_type_from_query(search_query)
     metadata: dict[str, Any] = {
         "status": "ok",
         "requested_collections": valid_keys,
         "failed_collections": {},
+        "query_hints": {
+            "competition": detected_competition,
+            "document_type": detected_document_type,
+        },
     }
     if not collection_names:
         metadata["status"] = "failed"
@@ -520,8 +703,7 @@ def search_with_metadata(
 
     candidate_limit = max(limit * 4, 24)
     cache_key = hashlib.sha256(
-        f"{query}|{candidate_limit}|{min_score}|{','.join(sorted(valid_keys))}"
-        f"|{category}".encode()
+        f"{search_query}|{candidate_limit}|{min_score}|{','.join(sorted(valid_keys))}|{category}|{','.join(sorted(requested_confidence))}".encode()
     ).hexdigest()
     now = time.monotonic()
     cached = _search_cache.get(cache_key)
@@ -529,7 +711,7 @@ def search_with_metadata(
         return cached[1][:candidate_limit], dict(cached[2])
 
     try:
-        vector = _model.encode(query).tolist()
+        vector = _model.encode(search_query).tolist()
     except Exception as exc:
         metadata["status"] = "failed"
         metadata["failed_collections"] = {"embedding": str(exc)[:500]}
@@ -546,6 +728,15 @@ def search_with_metadata(
         COLLECTIONS.get("qna"): category_filter,
         COLLECTIONS.get("kb"): None,
     }
+    rules_filter = _build_rules_filter(detected_competition, detected_document_type)
+    if rules_filter:
+        for collection_name in collection_names:
+            if collection_name not in RULE_COLLECTION_NAMES:
+                continue
+            collection_filters[collection_name] = _merge_filters(
+                collection_filters.get(collection_name),
+                rules_filter,
+            )
 
     per_collection: dict[str, list[dict]] = {}
     failures: dict[str, str] = {}
@@ -558,7 +749,7 @@ def search_with_metadata(
                 candidate_limit,
                 min_score,
                 collection_filters.get(col_name),
-                query,
+                search_query,
                 None,
                 failures,
             ): col_name
@@ -573,6 +764,10 @@ def search_with_metadata(
                 per_collection[col_name] = []
 
     output = [item for hits in per_collection.values() for item in hits]
+    for item in output:
+        if item.get("source_type") == "rules":
+            item["lexical_boost"] = _compute_rule_query_boost(search_query, item)
+            item["score"] += item["lexical_boost"] * 0.2
     output.sort(key=lambda item: item["score"], reverse=True)
 
     # Deduplicate over the complete candidate pool, then backfill until the
@@ -1004,6 +1199,34 @@ _COMPETITION_PATTERNS = (
     ("baja", re.compile(r"바하|baja", re.IGNORECASE)),
     ("ev", re.compile(r"\bev\b|전기차|electric\s+vehicle", re.IGNORECASE)),
 )
+_RULE_QUERY_NORMALIZERS = (
+    (re.compile(r"\b경기\s*진행\s*규정\b", re.IGNORECASE), "경기진행규정"),
+    (re.compile(r"\b대회\s*운영\s*규정\b", re.IGNORECASE), "대회운영규정"),
+    (re.compile(r"\b차량\s*기술\s*규정\b", re.IGNORECASE), "차량기술규정"),
+    (re.compile(r"\b심사\s*규정\b", re.IGNORECASE), "심사규정"),
+    (re.compile(r"\b안전\s*규정\b", re.IGNORECASE), "안전규정"),
+)
+_RULE_QUERY_STOP_WORDS = {
+    "규정",
+    "문서",
+    "관련",
+    "방법",
+    "조건",
+    "기준",
+    "요건",
+    "무엇",
+    "어떤",
+    "어디",
+    "언제",
+    "얼마",
+    "어떻게",
+    "조",
+    "조항",
+    "항",
+    "규정집",
+}
+_RULE_SECTION_REF_RE = re.compile(r"제\s*(\d+)\s*조")
+_RULE_CHAPTER_REF_RE = re.compile(r"제\s*(\d+)\s*장")
 
 _COMPETITION_CATEGORY = {
     "smart_e_mobility": "EV",
@@ -1021,19 +1244,134 @@ def _detect_competition(query: str) -> str | None:
     return None
 
 
+def _normalize_rule_query(query: str) -> str:
+    text = unicodedata.normalize("NFKC", (query or "").strip())
+    if not text:
+        return ""
+    for pattern, repl in _RULE_QUERY_NORMALIZERS:
+        text = pattern.sub(repl, text)
+    text = text.replace("\u200b", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _infer_document_type_from_query(query: str) -> str | None:
+    guessed = normalize_document_type(infer_document_type(query))
+    return None if guessed == "other" else guessed
+
+
+def _extract_rule_terms(query: str) -> set[str]:
+    normalized = _normalize_rule_query(query).lower()
+    terms = re.findall(r"[가-힣]{2,}|[a-z0-9_\-+]{2,}", normalized)
+    return {term for term in terms if term not in _RULE_QUERY_STOP_WORDS}
+
+
+def _extract_rule_refs(query: str) -> dict[str, set[int]]:
+    normalized = _normalize_rule_query(query)
+    return {
+        "sections": {int(m.group(1)) for m in _RULE_SECTION_REF_RE.finditer(normalized)},
+        "chapters": {int(m.group(1)) for m in _RULE_CHAPTER_REF_RE.finditer(normalized)},
+    }
+
+
 def _detect_category(query: str) -> str | None:
     """Detect competition category from query keywords."""
     competition = _detect_competition(query)
     return _COMPETITION_CATEGORY.get(competition)
 
 
+def _parse_intish(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return int(value)
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _source_matches_competition(source: dict, competition: str | None) -> bool:
     """Reject only documents that explicitly name a different competition."""
     if not competition:
         return True
-    text = f"{source.get('source', '')}\n{source.get('content', '')[:1200]}"
-    source_competition = source.get("competition") or _detect_competition(text)
-    return source_competition is None or source_competition == competition
+    source_competition = source.get("competition")
+    if source_competition is None:
+        text = f"{source.get('source', '')}\n{source.get('content', '')[:1200]}"
+        source_competition = _detect_competition(text)
+    source_competition_key = (
+        normalize_competition_key(source_competition) if source_competition else None
+    )
+    return source_competition_key is None or source_competition_key == "other" or source_competition_key == competition
+
+
+def _build_rules_filter(competition: str | None, document_type: str | None) -> models.Filter | None:
+    conditions: list[Any] = []
+    if competition:
+        normalized_competition = normalize_competition_key(competition)
+        if normalized_competition == "other":
+            competition_match: Any = models.MatchValue(value="other")
+        else:
+            competition_match = models.MatchAny(any=[normalized_competition, "other"])
+        conditions.append(
+            models.FieldCondition(
+                key="competition",
+                match=competition_match,
+            )
+        )
+    if document_type:
+        conditions.append(models.FieldCondition(key="document_type", match=models.MatchValue(value=document_type)))
+    if not conditions:
+        return None
+    return models.Filter(must=conditions)
+
+
+def _merge_filters(base: models.Filter | None, extra: models.Filter | None) -> models.Filter | None:
+    if base is None:
+        return extra
+    if extra is None:
+        return base
+
+    must = list(base.must or [])
+    must.extend(extra.must or [])
+    return models.Filter(must=must)
+
+
+def _compute_rule_query_boost(query: str, source: dict) -> float:
+    boost = 0.0
+    normalized_query = _normalize_rule_query(query)
+    query_terms = _extract_rule_terms(normalized_query)
+    refs = _extract_rule_refs(normalized_query)
+    competition_hint = _detect_competition(normalized_query)
+    document_type_hint = _infer_document_type_from_query(normalized_query)
+
+    source_competition = source.get("competition")
+    source_document_type = normalize_document_type(source.get("document_type"))
+
+    if competition_hint:
+        if source_competition == competition_hint:
+            boost += 0.18
+        elif source_competition:
+            boost -= 0.08
+
+    if document_type_hint:
+        if source_document_type == document_type_hint:
+            boost += 0.14
+        elif source_document_type and source_document_type != document_type_hint:
+            boost -= 0.04
+
+    source_section_num = _parse_intish(source.get("section_num"))
+    if source_section_num is not None and source_section_num in refs["sections"]:
+        boost += 0.20
+
+    source_chapter_num = _parse_intish(source.get("chapter_num"))
+    if source_chapter_num is not None and source_chapter_num in refs["chapters"]:
+        boost += 0.12
+
+    searchable = f"{source.get('source_title', '')} {source.get('source_filename', '')} {source.get('section', '')} {source.get('chapter', '')} {source.get('document_type_label', '')} {source.get('competition', '')}".lower()
+    matched = sum(1 for term in query_terms if term in searchable)
+    boost += min(0.35, matched * 0.06)
+
+    return boost
 
 
 def _rerank_excerpt(source: dict) -> str:
@@ -1173,7 +1511,9 @@ async def search_and_stream(
 
     # Auto-detect the exact competition first; generic "전기" no longer
     # routes unrelated electrical questions into EV.
-    competition = competition or _detect_competition(search_query) or _detect_competition(query)
+    normalized_search_query = _normalize_rule_query(search_query)
+    original_normalized_query = _normalize_rule_query(query)
+    competition = competition or _detect_competition(normalized_search_query) or _detect_competition(original_normalized_query)
     if not category:
         category = _COMPETITION_CATEGORY.get(competition)
 
@@ -1183,7 +1523,7 @@ async def search_and_stream(
     sources, retrieval_meta = await loop.run_in_executor(
         None,
         lambda: search_with_metadata(
-            search_query, limit, min_score, collections, category
+            normalized_search_query, limit, min_score, collections, category
         ),
     )
 
@@ -1193,7 +1533,7 @@ async def search_and_stream(
         original_sources, original_meta = await loop.run_in_executor(
             None,
             lambda: search_with_metadata(
-                query, limit, min_score, collections, category
+                original_normalized_query, limit, min_score, collections, category
             ),
         )
         merged: dict[tuple[str, str], dict] = {}

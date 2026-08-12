@@ -13,6 +13,34 @@ python bench/realquery_bench.py            # 실사용 질의 40개, 결과 차�
 
 `realquery_bench.py`는 운영 DB에서 뽑은 질의를 `/tmp/realq.json`에서 읽는다.
 
+규정 임베딩(2026) A/B 비교는 아래 스크립트를 사용합니다.
+
+```sh
+QDRANT_API_KEY=... \
+python bench/rules_reembed_bench.py \
+  --baseline-collection ksae-formula-rules \
+  --candidate-collection ksae-formula-rules-reembed \
+  --chunks data/processed/rules_chunks.json \
+  --samples-per-task 60 \
+  --limit 10 \
+  --output bench/output/rules-reembed-bench.json
+```
+
+2026년 전체 규정 문서(차량기술규정 외 경기진행/심사/안전규정 포함)로 이동한 `rules-2026` 파이프라인은
+`data/processed/rules-2026/rules-2026-all-chunks.json` 기준으로 비교할 때도 동일 스크립트를 사용합니다.
+
+```sh
+python bench/rules_reembed_bench.py \
+  --chunks data/processed/rules-2026/rules-2026-all-chunks.json \
+  --baseline-collection ksae-formula-rules \
+  --candidate-collection <new-rule-collection> \
+  --qdrant-url https://vectordb.luftaquila.io:443 \
+  --api-key "$QDRANT_API_KEY" \
+  --samples-per-task 60 \
+  --limit 10 \
+  --output bench/output/rules-2026-reembed-bench.json
+```
+
 ## 측정 결과 요약 (2026-08-07, ksae-aark-kb 4,153점)
 
 정답이 있는 합성 과제에서는 sparse가 어휘 검색에 강했지만,

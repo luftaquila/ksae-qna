@@ -36,6 +36,151 @@ def test_explicitly_conflicting_competition_source_is_rejected():
     assert chat._source_matches_competition(generic_source, "smart_e_mobility") is True
 
 
+def test_other_competition_is_treated_as_global_rule_source():
+    assert chat._source_matches_competition({"competition": "other"}, "formula") is True
+    assert chat._source_matches_competition({"competition": "formula"}, "formula") is True
+    assert chat._source_matches_competition({"competition": "baja"}, "formula") is False
+
+
+def test_build_rules_filter_includes_other_competition():
+    filters = chat._build_rules_filter("formula", "event-operation")
+    assert filters is not None
+    competition_condition = next(condition for condition in filters.must or [] if condition.key == "competition")
+    document_type_condition = next(condition for condition in filters.must or [] if condition.key == "document_type")
+    assert isinstance(competition_condition.match, chat.models.MatchAny)
+    assert set(competition_condition.match.any) == {"formula", "other"}
+    assert isinstance(document_type_condition.match, chat.models.MatchValue)
+    assert document_type_condition.match.value == "event-operation"
+
+
+def test_build_rules_filter_keeps_other_as_only_competition_value():
+    filters = chat._build_rules_filter("other", "vehicle-technical")
+    assert filters is not None
+    competition_condition = filters.must[0]
+    assert isinstance(competition_condition.match, chat.models.MatchValue)
+    assert competition_condition.match.value == "other"
+
+
+def test_master_rules_chip_expands_only_to_available_detail_collections(monkeypatch):
+    available_detail = "ksae-rules-formula-event-operation-2026-v2"
+    expected_formula_detail = "rules-formula-event-operation-2026"
+    expected_hidden_detail = "rules-formula-vehicle-technical-2026"
+
+    class FakeQdrant:
+        def get_collections(self):
+            return SimpleNamespace(collections=[SimpleNamespace(name=available_detail)])
+
+    original_qdrant = chat._qdrant
+    chat._qdrant = FakeQdrant()
+    try:
+        expanded = chat.expand_collection_keys(["rules"])
+    finally:
+        chat._qdrant = original_qdrant
+
+    assert "rules" in expanded
+    assert expected_formula_detail in expanded
+    assert expected_hidden_detail not in expanded
+
+
+def test_public_collections_hides_unpopulated_rules_detail_collections(monkeypatch):
+    available_detail = "ksae-rules-formula-event-operation-2026-v2"
+
+    class FakeQdrant:
+        def get_collections(self):
+            return SimpleNamespace(collections=[SimpleNamespace(name=available_detail)])
+
+    original_qdrant = chat._qdrant
+    chat._qdrant = FakeQdrant()
+    try:
+        public = chat.get_public_collections()
+    finally:
+        chat._qdrant = original_qdrant
+
+    keys = {item["key"] for item in public}
+    assert "rules" in keys
+    assert "qna" in keys
+    assert "kb" in keys
+    assert "rules-formula-event-operation-2026" in keys
+    assert "rules-formula-vehicle-technical-2026" not in keys
+
+
+def test_collection_discovery_failure_exposes_stable_sources_only(monkeypatch):
+    class FailingQdrant:
+        def get_collections(self):
+            raise RuntimeError("qdrant unavailable")
+
+    monkeypatch.setattr(chat, "_qdrant", FailingQdrant())
+
+    public_keys = [item["key"] for item in chat.get_public_collections()]
+    assert public_keys == ["rules", "qna", "kb"]
+    assert chat.expand_collection_keys(["rules"]) == ["rules"]
+
+
+def test_legacy_rules_collection_is_not_filtered(monkeypatch):
+    captured_filters: dict[str, object] = {}
+    detail_collection = chat.COLLECTIONS["rules-formula-event-operation-2026"]
+
+    class FakeEmbedding:
+        def encode(self, _query):
+            return SimpleNamespace(tolist=lambda: [1.0])
+
+    def fake_search(_vector, collection_name, _limit, _min_score, query_filter, *_args):
+        captured_filters[collection_name] = query_filter
+        return []
+
+    monkeypatch.setattr(chat, "_model", FakeEmbedding())
+    monkeypatch.setattr(chat, "_search_collection", fake_search)
+    monkeypatch.setattr(chat, "_get_available_collections", lambda: {detail_collection})
+    chat._search_cache.clear()
+
+    chat.search_with_metadata(
+        "formula 차량기술규정 제1조",
+        collections=["rules"],
+        category=None,
+        confidence=None,
+        min_per_collection=0,
+    )
+
+    assert captured_filters[chat.COLLECTIONS["rules"]] is None
+    assert captured_filters[detail_collection] is not None
+
+
+def test_master_rules_search_passes_global_competition_filter_to_other_collection(monkeypatch):
+    captured_filters: dict[str, object] = {}
+    formula_collection = chat.COLLECTIONS["rules-formula-event-operation-2026"]
+    other_collection = chat.COLLECTIONS["rules-other-event-operation-2026"]
+
+    class FakeEmbedding:
+        def encode(self, _query):
+            return SimpleNamespace(tolist=lambda: [1.0])
+
+    def fake_search(_vector, collection_name, _limit, _min_score, query_filter, *_args):
+        captured_filters[collection_name] = query_filter
+        return []
+
+    monkeypatch.setattr(chat, "_model", FakeEmbedding())
+    monkeypatch.setattr(chat, "_search_collection", fake_search)
+    monkeypatch.setattr(
+        chat,
+        "_get_available_collections",
+        lambda: {formula_collection, other_collection},
+    )
+    chat._search_cache.clear()
+
+    chat.search_with_metadata(
+        "formula 경기진행규정",
+        collections=["rules"],
+        min_per_collection=0,
+    )
+
+    other_filter = captured_filters[other_collection]
+    competition_condition = next(
+        condition for condition in other_filter.must or [] if condition.key == "competition"
+    )
+    assert isinstance(competition_condition.match, chat.models.MatchAny)
+    assert set(competition_condition.match.any) == {"formula", "other"}
+
+
 def test_standalone_query_is_not_needlessly_rewritten():
     history = [{"role": "user", "content": "이전 질문"}]
     assert chat._should_rewrite_query("포뮬러 GLVS 장착 위치 규정을 알려줘", history) is False
