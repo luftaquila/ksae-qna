@@ -162,10 +162,11 @@ test("source selector always keeps at least one source enabled", async ({ page }
   await page.goto("/static/index.html");
 
   const inputs = page.locator('input[name="collections"]');
+  const chips = page.locator(".collection-chip");
   await expect(inputs).toHaveCount(3);
-  await inputs.nth(0).uncheck();
-  await inputs.nth(1).uncheck();
-  await inputs.nth(2).uncheck();
+  await chips.nth(0).click();
+  await chips.nth(1).click();
+  await chips.nth(2).click();
 
   await expect(inputs.nth(2)).toBeChecked();
 });
