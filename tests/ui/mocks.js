@@ -1,6 +1,6 @@
 export const collections = [
-  { key: "rules", label: "규정", description: "대회 규정집 (2026 Formula)" },
-  { key: "qna", label: "Q&A", description: "KSAE Q&A 게시판", filter: "category" },
+  { key: "rules", label: "규정", description: "2026 대회 규정 전체" },
+  { key: "qna", label: "Q&A", description: "KSAE Q&A 게시판 전체" },
   { key: "kb", label: "AARK", description: "참가팀 익명 단톡방 지식베이스" },
 ];
 

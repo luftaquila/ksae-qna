@@ -34,6 +34,8 @@ test("chat sends a question and renders streamed evidence", async ({ page }) => 
   const chatPayload = (await chatRequest).postDataJSON();
   expect(chatPayload).not.toHaveProperty("confidence");
   expect(chatPayload).not.toHaveProperty("model");
+  expect(chatPayload).not.toHaveProperty("category");
+  expect(chatPayload).not.toHaveProperty("competition");
   await expect(page.locator(".msg.assistant .answer")).toContainText("측정 조건을 먼저 확인해야 합니다");
   await expect(page.getByRole("button", { name: /참고 문서 1건/ })).toBeVisible();
   await expect(page.locator("#credit-badge")).toContainText("17 이용권");
@@ -137,6 +139,47 @@ test("AARK always searches every confidence level", async ({ page }) => {
   await page.goto("/static/index.html");
   await expect(page.locator("#confidence-select")).toHaveCount(0);
   await expect(page.locator('.collection-chip input[value="kb"]')).toBeChecked();
+});
+
+test("source selector exposes only broad source groups", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  await installChatMocks(page);
+  await page.goto("/static/index.html");
+  const sourceInputs = page.locator('.collection-chip input[name="collections"]');
+  await expect(sourceInputs).toHaveCount(3);
+  expect(await sourceInputs.evaluateAll((elements) => elements.map((element) => element.value))).toEqual(["rules", "qna", "kb"]);
+  await expect(page.locator("#category-select")).toHaveCount(0);
+  await expect(page.locator(".rules-detail-toggle")).toHaveCount(0);
+  await expect(page.locator(".collection-chip-child")).toHaveCount(0);
+  const chipRows = await page.locator(".collection-chip").evaluateAll((elements) =>
+    elements.map((element) => Math.round(element.getBoundingClientRect().top)),
+  );
+  expect(new Set(chipRows).size).toBe(1);
+});
+
+test("source selector always keeps at least one source enabled", async ({ page }) => {
+  await installChatMocks(page);
+  await page.goto("/static/index.html");
+
+  const inputs = page.locator('input[name="collections"]');
+  await expect(inputs).toHaveCount(3);
+  await inputs.nth(0).uncheck();
+  await inputs.nth(1).uncheck();
+  await inputs.nth(2).uncheck();
+
+  await expect(inputs.nth(2)).toBeChecked();
+});
+
+test("chat payload leaves competition and Q&A routing to the server", async ({ page }) => {
+  await installChatMocks(page);
+  await page.goto("/static/index.html");
+  const chatRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/chat");
+  await page.locator("#query").fill("배터리 규정 알려줘");
+  await page.locator("#query").press("Enter");
+  const payload = (await chatRequest).postDataJSON();
+  expect(payload.collections).toEqual(["rules", "qna", "kb"]);
+  expect(payload).not.toHaveProperty("category");
+  expect(payload).not.toHaveProperty("competition");
 });
 
 for (const width of [320, 375, 414, 768]) {

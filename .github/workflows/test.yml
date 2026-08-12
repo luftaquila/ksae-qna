@@ -36,4 +36,4 @@ jobs:
       - name: Run UI regression tests
         run: >-
           npx playwright test tests/ui/chat.spec.js
-          --grep "collection chips keep their width when toggled|AARK always searches every confidence level|chat keeps the original welcome copy|mobile welcome notice is not clipped|chat does not overflow"
+          --grep "collection chips keep their width when toggled|AARK always searches every confidence level|source selector exposes only broad source groups|source selector always keeps at least one source enabled|chat payload leaves competition and Q&A routing to the server|chat keeps the original welcome copy|mobile welcome notice is not clipped|chat does not overflow"
