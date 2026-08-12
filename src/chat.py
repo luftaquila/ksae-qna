@@ -26,7 +26,6 @@ from sentence_transformers import SentenceTransformer
 
 from src.auth import get_model_settings_map, set_model_settings
 from src.rules_registry import (
-    COMPETITION_KEYS,
     RULES_COLLECTION_YEAR,
     normalize_competition_key,
     infer_document_type,
@@ -61,7 +60,7 @@ def _build_collection_registry() -> dict[str, dict]:
         "rules": {
             "collection": "ksae-formula-rules",
             "label": "규정",
-            "description": "대회 규정집 (2026 Formula)",
+            "description": "2026 대회 규정 전체 — 질문에 맞는 종목과 문서를 자동 검색",
             "authority": "공식",
             "source_type": "rules",
             "competition": "formula",
@@ -72,9 +71,8 @@ def _build_collection_registry() -> dict[str, dict]:
         "qna": {
             "collection": "ksae-qna",
             "label": "Q&A",
-            "description": "KSAE Q&A 게시판 — 운영진 질의응답",
+            "description": "KSAE Q&A 게시판 전체 — 질문에 맞는 분류를 자동 검색",
             "authority": "공식 해석",
-            "filter": "category",
             "source_type": "qna",
             "year": "",
         },
@@ -106,7 +104,6 @@ def _build_collection_registry() -> dict[str, dict]:
 
 
 COLLECTION_REGISTRY: dict[str, dict] = _build_collection_registry()
-ALLOWED_COMPETITION_KEYS = tuple(COMPETITION_KEYS)
 COLLECTIONS = {key: meta["collection"] for key, meta in COLLECTION_REGISTRY.items()}
 RULE_COLLECTION_NAMES = tuple(
     meta["collection"]
@@ -145,15 +142,20 @@ def _is_active_rule_collection_key(
 
 
 def get_public_collections() -> list[dict[str, Any]]:
-    """Return only the rule collections that are available in Qdrant plus stable sources."""
-    available = _get_available_collections()
-    visible: list[dict[str, Any]] = []
-    for key, meta in COLLECTION_REGISTRY.items():
-        if key != "rules" and meta.get("source_type") == "rules":
-            if not _is_active_rule_collection_key(key, available):
-                continue
-        visible.append({"key": key, **{k: v for k, v in meta.items() if k != "collection"}})
-    return visible
+    """Return the three user-selectable source groups.
+
+    Detailed rule collections stay internal. Selecting ``rules`` expands to
+    every populated rule collection, while competition and document type are
+    inferred from the query.
+    """
+    public_fields = ("label", "description", "authority", "source_type")
+    return [
+        {
+            "key": key,
+            **{field: COLLECTION_REGISTRY[key][field] for field in public_fields},
+        }
+        for key in ("rules", "qna", "kb")
+    ]
 
 
 def expand_collection_keys(

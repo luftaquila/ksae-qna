@@ -353,9 +353,7 @@ form.addEventListener("submit", async (e) => {
 
   try {
     const collections = [...form.querySelectorAll('input[name="collections"]:checked')].map((el) => el.value);
-    const categoryEl = document.getElementById("category-select");
-    const category = categoryEl && !categoryEl.disabled ? (categoryEl.value || null) : null;
-    const body = { query, collections, category };
+    const body = { query, collections };
     if (currentSessionId) body.session_id = currentSessionId;
 
     const res = await fetch("/api/chat", {
@@ -608,12 +606,10 @@ function formatLocal(utcStr) {
 }
 
 // ---------------------------------------------------------------------------
-// Collections (검색 소스) — /api/collections 로 칩·필터를 렌더한다.
-// 소스를 추가할 때 이 파일을 고칠 필요가 없다.
+// Collections (검색 소스) — 사용자는 데이터 종류만 고른다.
+// 종목, 규정 유형, Q&A 카테고리는 서버가 질문에서 자동 판별한다.
 // ---------------------------------------------------------------------------
 let availableCollections = [];
-
-const CATEGORY_OPTIONS = ["Formula", "Baja", "EV"];
 
 async function loadCollections() {
   try {
@@ -631,32 +627,9 @@ function renderCollectionChips() {
   if (!host) return;
   host.innerHTML = "";
 
-  const [ruleCollections, standardCollections] = splitCollectionsForRender(availableCollections);
-  for (const c of standardCollections) {
+  for (const c of availableCollections) {
     host.appendChild(buildCollectionChip(c, "checked"));
-    if (c.filter === "category") host.appendChild(buildCategorySelect());
   }
-  if (ruleCollections.length) {
-    host.appendChild(buildRuleCollectionGroup(ruleCollections));
-  }
-  syncFilterStates();
-}
-
-function splitCollectionsForRender(collections) {
-  const regular = [];
-  const rules = [];
-  for (const c of collections) {
-    if (isRuleCollection(c)) {
-      rules.push(c);
-      continue;
-    }
-    regular.push(c);
-  }
-  return [rules, regular];
-}
-
-function isRuleCollection(collection) {
-  return collection.source_type === "rules" || collection.key === "rules";
 }
 
 function buildCollectionChip(collection, checked = "checked") {
@@ -668,101 +641,11 @@ function buildCollectionChip(collection, checked = "checked") {
     `<input type="checkbox" name="collections" value="${escapeAttr(collection.key)}" ${checkedAttr}>` +
     `<span>${escapeHtml(collection.label)}</span>`;
   const checkbox = label.querySelector("input");
-  checkbox.addEventListener("change", syncFilterStates);
+  checkbox.addEventListener("change", () => {
+    const enabledSources = form.querySelectorAll('input[name="collections"]:checked');
+    if (enabledSources.length === 0) checkbox.checked = true;
+  });
   return label;
-}
-
-function buildRuleCollectionGroup(ruleCollections) {
-  const master = ruleCollections.find((c) => c.key === "rules") || ruleCollections[0];
-  const detailCandidates = ruleCollections.filter((c) => c.key !== master.key);
-
-  const wrapper = document.createElement("div");
-  wrapper.className = "collection-rule-group";
-
-  const masterChip = buildCollectionChip(master, "checked");
-  wrapper.appendChild(masterChip);
-
-  if (detailCandidates.length === 0) {
-    return wrapper;
-  }
-
-  const detailsWrap = document.createElement("div");
-  detailsWrap.className = "rules-subcollections collapsed";
-
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "rules-detail-toggle";
-  toggle.textContent = "규정 상세 선택";
-  wrapper.appendChild(toggle);
-  wrapper.appendChild(detailsWrap);
-
-  const childCheckboxes = [];
-  const masterCheckbox = masterChip.querySelector("input");
-  masterCheckbox.addEventListener("change", () => {
-    const shouldDisable = masterCheckbox.checked;
-    detailsWrap.classList.add("collapsed");
-    toggle.textContent = shouldDisable ? "규정 상세 선택" : "규정 상세 선택";
-    childCheckboxes.forEach((cb) => {
-      cb.disabled = shouldDisable;
-      if (shouldDisable) {
-        cb.checked = false;
-      }
-    });
-    syncFilterStates();
-  });
-
-  toggle.addEventListener("click", () => {
-    const isCollapsed = detailsWrap.classList.toggle("collapsed");
-    toggle.textContent = isCollapsed ? "규정 상세 선택" : "규정 상세 접기";
-    if (!isCollapsed && masterCheckbox.checked) {
-      masterCheckbox.checked = false;
-      childCheckboxes.forEach((cb) => {
-        cb.disabled = false;
-      });
-      syncFilterStates();
-    }
-  });
-
-  for (const c of detailCandidates) {
-    const chip = buildCollectionChip(c, "");
-    chip.classList.add("collection-chip-child");
-    const checkbox = chip.querySelector("input");
-    checkbox.checked = false;
-    childCheckboxes.push(checkbox);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked && masterCheckbox) {
-        masterCheckbox.checked = false;
-      }
-      syncFilterStates();
-    });
-    detailsWrap.appendChild(chip);
-  }
-
-  if (masterCheckbox.checked) {
-    childCheckboxes.forEach((cb) => (cb.disabled = true));
-  }
-  return wrapper;
-}
-
-function buildCategorySelect() {
-  const sel = document.createElement("select");
-  sel.id = "category-select";
-  sel.className = "category-select";
-  sel.title = "Q&A 카테고리 필터";
-  sel.innerHTML =
-    `<option value="">전체</option>` +
-    CATEGORY_OPTIONS.map((o) => `<option value="${o}">${o}</option>`).join("");
-  return sel;
-}
-
-function syncFilterStates() {
-  for (const c of availableCollections) {
-    const box = document.querySelector(`input[name="collections"][value="${c.key}"]`);
-    const sel = c.filter === "category" ? document.getElementById("category-select") : null;
-    if (!box || !sel) continue;
-    sel.disabled = !box.checked;
-    if (!box.checked) sel.value = "";
-  }
 }
 
 // ---------------------------------------------------------------------------

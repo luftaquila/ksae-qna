@@ -82,26 +82,13 @@ def test_master_rules_chip_expands_only_to_available_detail_collections(monkeypa
     assert expected_hidden_detail not in expanded
 
 
-def test_public_collections_hides_unpopulated_rules_detail_collections(monkeypatch):
-    available_detail = "ksae-rules-formula-event-operation-2026-v2"
+def test_public_collections_exposes_only_broad_source_groups():
+    public = chat.get_public_collections()
 
-    class FakeQdrant:
-        def get_collections(self):
-            return SimpleNamespace(collections=[SimpleNamespace(name=available_detail)])
-
-    original_qdrant = chat._qdrant
-    chat._qdrant = FakeQdrant()
-    try:
-        public = chat.get_public_collections()
-    finally:
-        chat._qdrant = original_qdrant
-
-    keys = {item["key"] for item in public}
-    assert "rules" in keys
-    assert "qna" in keys
-    assert "kb" in keys
-    assert "rules-formula-event-operation-2026" in keys
-    assert "rules-formula-vehicle-technical-2026" not in keys
+    assert [item["key"] for item in public] == ["rules", "qna", "kb"]
+    assert all("filter" not in item for item in public)
+    assert all("competition" not in item for item in public)
+    assert all("document_type" not in item for item in public)
 
 
 def test_collection_discovery_failure_exposes_stable_sources_only(monkeypatch):

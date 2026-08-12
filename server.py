@@ -70,7 +70,6 @@ from src.chat import (
     MODEL_CONFIG,
     PRIMARY_MODEL_KEY,
     PROMPT_VERSION,
-    ALLOWED_COMPETITION_KEYS,
     get_public_collections,
     get_all_models_admin,
     get_health_status,
@@ -168,8 +167,6 @@ class ChatRequest(BaseModel):
     limit: int = Field(default=7, ge=1, le=20)
     session_id: int | None = None
     collections: list[str] | None = None
-    category: str | None = None
-    competition: str | None = None
 
 
 class SessionPatch(BaseModel):
@@ -370,9 +367,6 @@ async def chat(request: Request, req: ChatRequest):
         invalid_collections = set(req.collections) - public_collections
     if invalid_collections:
         return JSONResponse({"error": "지원하지 않는 검색 소스가 포함되어 있습니다"}, status_code=400)
-    if req.competition not in (None, *ALLOWED_COMPETITION_KEYS):
-        return JSONResponse({"error": "지원하지 않는 대회 종목입니다"}, status_code=400)
-
     # Validate ownership before charging.  Previously a stale/foreign session
     # returned 404 only after consuming the user's credits.
     session_id = req.session_id
@@ -407,8 +401,8 @@ async def chat(request: Request, req: ChatRequest):
             req.query,
             PRIMARY_MODEL_KEY,
             collections=json.dumps(req.collections, ensure_ascii=False) if req.collections else None,
-            category=req.category,
-            competition=req.competition,
+            category=None,
+            competition=None,
             confidence=None,
             prompt_version=PROMPT_VERSION,
         )
@@ -441,7 +435,7 @@ async def chat(request: Request, req: ChatRequest):
         resolved_model = None
         resolved_model_id = None
         finish_reason = None
-        competition = req.competition
+        competition = None
         retrieval_status = "pending"
         retrieval_ms = None
         rerank_ms = None
@@ -475,8 +469,8 @@ async def chat(request: Request, req: ChatRequest):
                 min_score=0.5,
                 history=history,
                 collections=req.collections,
-                category=req.category,
-                competition=req.competition,
+                category=None,
+                competition=None,
             ):
                 event_type, payload = parse_event(event)
 
