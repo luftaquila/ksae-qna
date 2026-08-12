@@ -302,12 +302,9 @@ def test_candidate_pool_caps_dominant_source_without_guaranteeing_equal_slots():
         sources.append({"collection": "kb", "source_type": "aark", "score": 0.7 - index / 1000})
 
     balanced = chat._balance_candidate_pool(sources, 24)
-    counts = {
-        group: sum(1 for source in balanced if chat._candidate_source_group(source) == group)
-        for group in ("qna", "rules", "aark")
-    }
+    counts = chat._candidate_counts(balanced)
 
-    assert counts == {"qna": 12, "rules": 8, "aark": 4}
+    assert counts == {"qna": 12, "rules": 8, "aark": 4, "other": 0}
 
 
 def test_smart_e_document_type_filter_uses_internal_competition_key():

@@ -822,10 +822,7 @@ def search_with_metadata(
     if failures:
         metadata["status"] = "failed" if not output and len(failures) == len(collection_names) else "partial"
     metadata["candidate_count"] = len(deduped)
-    metadata["candidate_counts"] = {
-        group: sum(1 for item in deduped if _candidate_source_group(item) == group)
-        for group in ("rules", "qna", "aark", "other")
-    }
+    metadata["candidate_counts"] = _candidate_counts(deduped)
 
     if metadata["status"] == "ok":
         if len(_search_cache) >= _CACHE_MAX:
@@ -1564,6 +1561,13 @@ def _candidate_source_group(source: dict) -> str:
     return "other"
 
 
+def _candidate_counts(sources: list[dict]) -> dict[str, int]:
+    return {
+        group: sum(1 for source in sources if _candidate_source_group(source) == group)
+        for group in ("rules", "qna", "aark", "other")
+    }
+
+
 def _balance_candidate_pool(sources: list[dict], limit: int) -> list[dict]:
     """Cap a dominant source without guaranteeing slots to weak sources."""
     if len(sources) <= limit:
@@ -1749,6 +1753,7 @@ async def search_and_stream(
         sources = sorted(merged.values(), key=lambda item: item.get("score", 0), reverse=True)
         sources = _balance_candidate_pool(sources, max(limit * 4, 24))
         retrieval_meta["candidate_count"] = len(sources)
+        retrieval_meta["candidate_counts"] = _candidate_counts(sources)
         combined_failures = {
             **retrieval_meta.get("failed_collections", {}),
             **{f"original:{key}": value for key, value in original_meta.get("failed_collections", {}).items()},
