@@ -42,6 +42,31 @@ def test_other_competition_is_treated_as_global_rule_source():
     assert chat._source_matches_competition({"competition": "baja"}, "formula") is False
 
 
+def test_missing_electric_alias_collections_route_to_active_families():
+    active_keys = [
+        "rules-formula-vehicle-technical-2026",
+        "rules-smart-e-mobility-vehicle-technical-2026",
+    ]
+
+    assert chat._effective_rules_competition("e_formula", active_keys) == "formula"
+    assert chat._effective_rules_competition("ev", active_keys) == "smart_e_mobility"
+    assert chat._effective_rules_competition("baja", active_keys) == "baja"
+    assert chat._source_matches_competition(
+        {"competition": "formula"},
+        "e_formula",
+        {"formula"},
+    ) is True
+
+
+def test_active_exact_e_formula_collection_does_not_fall_back():
+    active_keys = [
+        "rules-formula-vehicle-technical-2026",
+        "rules-e-formula-vehicle-technical-2026",
+    ]
+
+    assert chat._effective_rules_competition("e_formula", active_keys) == "e_formula"
+
+
 def test_build_rules_filter_includes_other_competition():
     filters = chat._build_rules_filter("formula", "event-operation")
     assert filters is not None
@@ -172,6 +197,146 @@ def test_standalone_query_is_not_needlessly_rewritten():
     history = [{"role": "user", "content": "이전 질문"}]
     assert chat._should_rewrite_query("포뮬러 GLVS 장착 위치 규정을 알려줘", history) is False
     assert chat._should_rewrite_query("아니, E-Formula 기준이야", history) is True
+
+
+def test_rule_query_normalizes_workshop_typos_and_spacing():
+    normalized = chat._normalize_rule_query("베기 클램프 일반너트 노드 락")
+
+    assert "배기 클램프" in normalized
+    assert "일반 너트" in normalized
+    assert "노드락" in normalized
+    assert "Nord-Lock" in normalized
+    assert "풀림 방지" in normalized
+    assert chat._normalize_rule_query(normalized) == normalized
+
+
+def test_rewrite_must_preserve_concrete_korean_terms():
+    original = "배기 클램프 일반너트"
+
+    assert chat._preserves_query_identifiers(original, "KSAE 자작자동차") is False
+    assert chat._preserves_query_identifiers(original, "배기 클램프의 일반 너트 체결 규정") is True
+
+
+def test_bad_rewrite_falls_back_to_previous_user_context(monkeypatch):
+    class FakeModels:
+        @staticmethod
+        def generate_content(**_kwargs):
+            return SimpleNamespace(text="KSAE 자작자동차")
+
+    monkeypatch.setattr(chat, "_gemini", SimpleNamespace(models=FakeModels()))
+    history = [
+        {"role": "user", "content": "베기 클램프 노드락 체결"},
+        {"role": "assistant", "content": "노드락 사용 관련 답변"},
+    ]
+
+    rewritten = asyncio.run(chat._rewrite_query("배기 클램프 일반너트", history))
+
+    assert rewritten is not None
+    assert "배기 클램프 노드락 체결" in rewritten
+    assert "Nord-Lock" in rewritten
+    assert "배기 클램프 일반 너트" in rewritten
+
+
+def test_missing_document_type_collection_turns_hard_filter_into_hint(monkeypatch):
+    vehicle_key = "rules-formula-vehicle-technical-2026"
+    vehicle_collection = chat.COLLECTIONS[vehicle_key]
+    captured_filters: dict[str, object] = {}
+
+    class FakeEmbedding:
+        def encode(self, _query):
+            return SimpleNamespace(tolist=lambda: [1.0])
+
+    def fake_search(_vector, collection_name, _limit, _score, query_filter, *_args):
+        captured_filters[collection_name] = query_filter
+        return []
+
+    chat._search_cache.clear()
+    monkeypatch.setattr(chat, "_model", FakeEmbedding())
+    monkeypatch.setattr(chat, "_search_collection", fake_search)
+    monkeypatch.setattr(chat, "_get_available_collections", lambda: {vehicle_collection})
+
+    _, metadata = chat.search_with_metadata("안전벨트 브라켓 규정", collections=["rules"])
+
+    assert metadata["query_hints"]["document_type"] == "safety"
+    assert metadata["query_hints"]["document_type_filter"] is None
+    assert captured_filters[vehicle_collection] is None
+    chat._search_cache.clear()
+
+
+def test_existing_document_type_collection_keeps_hard_filter(monkeypatch):
+    event_key = "rules-formula-event-operation-2026"
+    event_collection = chat.COLLECTIONS[event_key]
+    captured_filters: dict[str, object] = {}
+
+    class FakeEmbedding:
+        def encode(self, _query):
+            return SimpleNamespace(tolist=lambda: [1.0])
+
+    def fake_search(_vector, collection_name, _limit, _score, query_filter, *_args):
+        captured_filters[collection_name] = query_filter
+        return []
+
+    chat._search_cache.clear()
+    monkeypatch.setattr(chat, "_model", FakeEmbedding())
+    monkeypatch.setattr(chat, "_search_collection", fake_search)
+    monkeypatch.setattr(chat, "_get_available_collections", lambda: {event_collection})
+
+    _, metadata = chat.search_with_metadata("포뮬러 경기진행규정", collections=["rules"])
+
+    assert metadata["query_hints"]["document_type_filter"] == "event-operation"
+    detail_filter = captured_filters[event_collection]
+    document_condition = next(
+        condition for condition in detail_filter.must or [] if condition.key == "document_type"
+    )
+    assert document_condition.match.value == "event-operation"
+    chat._search_cache.clear()
+
+
+def test_candidate_pool_is_balanced_before_reranking():
+    sources = []
+    for index in range(24):
+        sources.append({"collection": "qna", "score": 1.0 - index / 1000})
+    for index in range(8):
+        sources.append({"collection": "rules-formula-vehicle-technical-2026", "score": 0.8 - index / 1000})
+    for index in range(8):
+        sources.append({"collection": "kb", "source_type": "aark", "score": 0.7 - index / 1000})
+
+    balanced = chat._balance_candidate_pool(sources, 24)
+    counts = {
+        group: sum(1 for source in balanced if chat._candidate_source_group(source) == group)
+        for group in ("qna", "rules", "aark")
+    }
+
+    assert counts == {"qna": 8, "rules": 8, "aark": 8}
+
+
+def test_aark_unresolved_is_searched_but_penalized():
+    unresolved = {
+        "collection": "kb",
+        "source_type": "aark",
+        "confidence": "미해결",
+        "content": "결론: 답변 없음",
+    }
+    agreed = {
+        "collection": "kb",
+        "source_type": "aark",
+        "confidence": "합의됨",
+        "content": "결론: 사용할 수 있음",
+    }
+
+    assert chat._aark_evidence_penalty(unresolved) == 2.0
+    assert chat._aark_evidence_penalty(agreed) == 0.0
+
+
+def test_prompt_separates_rules_when_multiple_competitions_are_returned():
+    sources = [
+        {"source": "Formula 규정", "url": "", "content": "방화벽", "competition": "formula"},
+        {"source": "Baja 규정", "url": "", "content": "방화벽", "competition": "baja"},
+    ]
+
+    prompt = chat._build_prompt("방화벽 규정 설명", sources)
+
+    assert "이를 하나의 규정처럼 합치지 말고" in prompt
 
 
 def test_reranker_excerpt_contains_the_answer_not_only_question():

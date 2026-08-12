@@ -43,7 +43,7 @@ _anthropic: anthropic.AsyncAnthropic | None = None
 _model_enabled: dict[str, bool] = {}
 _model_health: dict[str, dict[str, Any]] = {}
 
-PROMPT_VERSION = "2026-08-quality-v2"
+PROMPT_VERSION = "2026-08-quality-v3"
 PRIMARY_MODEL_KEY = "gemini-3-pro"
 FALLBACK_MODEL_KEY = "gemini-3-flash"
 ROUTING_MODEL_KEYS = (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY)
@@ -94,6 +94,7 @@ def _build_collection_registry() -> dict[str, dict]:
             "authority": "공식",
             "source_type": "rules",
             "competition": info.competition_display,
+            "competition_key": info.competition,
             "document_type": document_type_label(info.document_type),
             "document_type_key": info.document_type,
             "supports_filters": True,
@@ -688,14 +689,23 @@ def search_with_metadata(
 
     search_query = _normalize_rule_query(query)
     detected_competition = _detect_competition(search_query) or _detect_competition(query)
+    filtered_competition = _effective_rules_competition(detected_competition, valid_keys)
     detected_document_type = _infer_document_type_from_query(search_query)
+    filtered_document_type = _effective_rules_document_type(
+        detected_document_type,
+        valid_keys,
+        detected_competition,
+        search_query,
+    )
     metadata: dict[str, Any] = {
         "status": "ok",
         "requested_collections": valid_keys,
         "failed_collections": {},
         "query_hints": {
             "competition": detected_competition,
+            "competition_filter": filtered_competition,
             "document_type": detected_document_type,
+            "document_type_filter": filtered_document_type,
         },
     }
     if not collection_names:
@@ -730,7 +740,7 @@ def search_with_metadata(
         COLLECTIONS.get("qna"): category_filter,
         COLLECTIONS.get("kb"): None,
     }
-    rules_filter = _build_rules_filter(detected_competition, detected_document_type)
+    rules_filter = _build_rules_filter(filtered_competition, filtered_document_type)
     if rules_filter:
         for collection_name in collection_names:
             if collection_name not in RULE_COLLECTION_NAMES:
@@ -770,6 +780,9 @@ def search_with_metadata(
         if item.get("source_type") == "rules":
             item["lexical_boost"] = _compute_rule_query_boost(search_query, item)
             item["score"] += item["lexical_boost"] * 0.2
+        aark_penalty = _aark_evidence_penalty(item)
+        if aark_penalty:
+            item["score"] -= aark_penalty * 0.04
     output.sort(key=lambda item: item["score"], reverse=True)
 
     # Deduplicate over the complete candidate pool, then backfill until the
@@ -796,8 +809,7 @@ def search_with_metadata(
                 continue
             seen_sections[stable_section] = count + 1
         deduped.append(item)
-        if len(deduped) >= candidate_limit:
-            break
+    deduped = _balance_candidate_pool(deduped, candidate_limit)
 
     metadata["failed_collections"] = {
         next((key for key, name in COLLECTIONS.items() if name == collection), collection): error
@@ -806,6 +818,10 @@ def search_with_metadata(
     if failures:
         metadata["status"] = "failed" if not output and len(failures) == len(collection_names) else "partial"
     metadata["candidate_count"] = len(deduped)
+    metadata["candidate_counts"] = {
+        group: sum(1 for item in deduped if _candidate_source_group(item) == group)
+        for group in ("rules", "qna", "aark", "other")
+    }
 
     if metadata["status"] == "ok":
         if len(_search_cache) >= _CACHE_MAX:
@@ -867,6 +883,16 @@ def _build_prompt(
     if search_query and search_query != query:
         prompt += f"(검색에 사용된 쿼리: {search_query})\n"
     prompt += f"(검색 상태: {retrieval_status})\n"
+    source_competitions = {
+        normalize_competition_key(str(source.get("competition")))
+        for source in sources
+        if source.get("competition")
+    } - {"other"}
+    if not _detect_competition(query) and len(source_competitions) > 1:
+        prompt += (
+            "(서로 다른 종목의 자료가 검색되었습니다. 이를 하나의 규정처럼 합치지 말고 "
+            "종목별 공통점과 차이를 명시하세요. 허용 여부가 달라지면 먼저 종목을 확인하세요.)\n"
+        )
     if _question_needs_clarification(query):
         prompt += "(질문이 불완전합니다. 추측해서 길게 답하지 말고 가장 중요한 확인 질문 하나만 하세요.)\n"
     prompt += f"사용자 질문: {query}"
@@ -895,7 +921,52 @@ def _preserves_query_identifiers(original: str, rewritten: str) -> bool:
         original,
         re.IGNORECASE,
     )
-    return all(token.lower() in rewritten.lower() for token in identifiers | set(competition_terms))
+    rewritten_lower = rewritten.lower()
+    if not all(token.lower() in rewritten_lower for token in identifiers | set(competition_terms)):
+        return False
+
+    # Prevent a short, concrete Korean query such as "배기 클램프 일반너트"
+    # from being rewritten into a generic phrase such as "KSAE 자작자동차".
+    # Whitespace is ignored so "일반너트" and "일반 너트" remain equivalent.
+    compact_rewritten = re.sub(r"[^가-힣a-z0-9]", "", rewritten_lower)
+    return all(term in compact_rewritten for term in _preserved_korean_terms(original))
+
+
+_QUERY_PRESERVATION_STOP_WORDS = {
+    "관련", "관련된", "관해서", "규정", "규정집", "기준", "내용", "설명",
+    "어떤식", "어떤식으로", "어떻게", "해야함", "하면", "가능한지", "가능해",
+    "알려줘", "보여줘", "이거", "저거", "그거", "이것", "저것", "그것",
+    "아니", "다시", "부분", "경우", "질문",
+}
+_QUERY_TERM_SUFFIXES = (
+    "에서는", "으로는", "이라고", "이라면", "에서", "에게", "으로", "까지",
+    "부터", "처럼", "보다", "하고", "이며", "인데", "은", "는", "이", "가",
+    "을", "를", "에", "와", "과", "도", "만", "의", "로",
+)
+
+
+def _preserved_korean_terms(value: str) -> set[str]:
+    terms: set[str] = set()
+    for raw in re.findall(r"[가-힣]{2,}", value or ""):
+        term = raw
+        for suffix in _QUERY_TERM_SUFFIXES:
+            if term.endswith(suffix) and len(term) - len(suffix) >= 2:
+                term = term[: -len(suffix)]
+                break
+        if term not in _QUERY_PRESERVATION_STOP_WORDS and len(term) >= 2:
+            terms.add(term)
+    return terms
+
+
+def _contextual_fallback_query(query: str, history: list[dict] | None) -> str | None:
+    """Build a deterministic second search path when LLM rewrite is unsafe."""
+    for message in reversed(history or []):
+        if message.get("role") != "user":
+            continue
+        previous = str(message.get("content") or "").strip()
+        if previous and previous != query.strip():
+            return _normalize_rule_query(f"{previous[:240]} {query}")
+    return None
 
 
 async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
@@ -954,10 +1025,10 @@ async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
         logger.warning("Query rewrite: '%s' -> '%s'", query, rewritten)
         if rewritten and rewritten != query and _preserves_query_identifiers(query, rewritten):
             return rewritten
-        return None
+        return _contextual_fallback_query(query, history)
     except Exception as e:
         logger.warning("Query rewrite failed, using original: %s", e)
-        return None
+        return _contextual_fallback_query(query, history)
 
 
 def _compress_history(history: list[dict]) -> list[dict]:
@@ -1202,6 +1273,11 @@ _COMPETITION_PATTERNS = (
     ("ev", re.compile(r"\bev\b|전기차|electric\s+vehicle", re.IGNORECASE)),
 )
 _RULE_QUERY_NORMALIZERS = (
+    (re.compile(r"\b베기(?=\s*(?:클램프|매니폴드|파이프|머플러|시스템|가스|구))", re.IGNORECASE), "배기"),
+    (re.compile(r"\b(?:노드\s+락|놀드\s*락|노르드\s*락|nordlock|nord\s+lock)\b", re.IGNORECASE), "노드락"),
+    (re.compile(r"\b일반\s*너트\b", re.IGNORECASE), "일반 너트"),
+    (re.compile(r"\b체인\s*가드\b", re.IGNORECASE), "체인가드"),
+    (re.compile(r"\b방화\s*벽\b", re.IGNORECASE), "방화벽"),
     (re.compile(r"\b경기\s*진행\s*규정\b", re.IGNORECASE), "경기진행규정"),
     (re.compile(r"\b대회\s*운영\s*규정\b", re.IGNORECASE), "대회운영규정"),
     (re.compile(r"\b차량\s*기술\s*규정\b", re.IGNORECASE), "차량기술규정"),
@@ -1253,12 +1329,79 @@ def _normalize_rule_query(query: str) -> str:
     for pattern, repl in _RULE_QUERY_NORMALIZERS:
         text = pattern.sub(repl, text)
     text = text.replace("\u200b", " ")
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    if "노드락" in text and not re.search(r"\bnord-lock\b", text, re.IGNORECASE):
+        text += " Nord-Lock"
+    # Short workshop-style queries frequently omit the actual concern.  Keep
+    # the user's words, but append common equivalent terms so both dense and
+    # lexical retrieval can reach the way the corpus phrases the same topic.
+    if "클램프" in text and "일반 너트" in text and "풀림 방지" not in text:
+        text += " 너트 체결 풀림 방지"
+    return text
 
 
 def _infer_document_type_from_query(query: str) -> str | None:
     guessed = normalize_document_type(infer_document_type(query))
     return None if guessed == "other" else guessed
+
+
+def _effective_rules_competition(
+    competition: str | None,
+    collection_keys: list[str],
+) -> str | None:
+    """Route aliases to the nearest active rules collection family."""
+    if not competition:
+        return None
+    active = {
+        str(meta.get("competition_key"))
+        for key in collection_keys
+        if (meta := COLLECTION_REGISTRY.get(key)) and meta.get("supports_filters")
+    }
+    if competition in active:
+        return competition
+    fallback = {
+        "e_formula": "formula",
+        "ev": "smart_e_mobility",
+    }.get(competition)
+    return fallback if fallback in active else competition
+
+
+def _effective_rules_document_type(
+    document_type: str | None,
+    collection_keys: list[str],
+    competition: str | None,
+    query: str,
+) -> str | None:
+    """Use a document-type hard filter only when that collection exists.
+
+    Query classification knows conceptual types such as ``safety`` and
+    ``judging``, but a year's uploaded PDFs may store those rules inside the
+    vehicle-technical document.  Applying a nonexistent type as a payload
+    filter silently removes every detailed rule result.
+    """
+    if not document_type:
+        return None
+    if document_type in {"safety", "judging"}:
+        explicit_type = {
+            "safety": re.compile(r"안전\s*규정", re.IGNORECASE),
+            "judging": re.compile(r"심사\s*규정", re.IGNORECASE),
+        }[document_type]
+        # A component name such as "안전벨트" is a vehicle-technical topic,
+        # not a request to exclude every document except a safety-rule PDF.
+        if not explicit_type.search(query):
+            return None
+    competition_key = normalize_competition_key(competition) if competition else None
+    for key in collection_keys:
+        meta = COLLECTION_REGISTRY.get(key) or {}
+        if not meta.get("supports_filters"):
+            continue
+        if meta.get("document_type_key") != document_type:
+            continue
+        source_competition = normalize_competition_key(str(meta.get("competition") or ""))
+        if competition_key and source_competition not in {competition_key, "other"}:
+            continue
+        return document_type
+    return None
 
 
 def _extract_rule_terms(query: str) -> set[str]:
@@ -1292,7 +1435,11 @@ def _parse_intish(value: Any) -> int | None:
         return None
 
 
-def _source_matches_competition(source: dict, competition: str | None) -> bool:
+def _source_matches_competition(
+    source: dict,
+    competition: str | None,
+    alternatives: set[str] | None = None,
+) -> bool:
     """Reject only documents that explicitly name a different competition."""
     if not competition:
         return True
@@ -1303,7 +1450,8 @@ def _source_matches_competition(source: dict, competition: str | None) -> bool:
     source_competition_key = (
         normalize_competition_key(source_competition) if source_competition else None
     )
-    return source_competition_key is None or source_competition_key == "other" or source_competition_key == competition
+    allowed = {competition, *(alternatives or set())}
+    return source_competition_key is None or source_competition_key == "other" or source_competition_key in allowed
 
 
 def _build_rules_filter(competition: str | None, document_type: str | None) -> models.Filter | None:
@@ -1384,6 +1532,60 @@ def _rerank_excerpt(source: dict) -> str:
     return content[:1000]
 
 
+def _aark_evidence_penalty(source: dict) -> float:
+    """Return a penalty while keeping every AARK confidence searchable."""
+    if source.get("source_type") != "aark" and source.get("collection") != "kb":
+        return 0.0
+    confidence = str(source.get("confidence") or "")
+    content = str(source.get("content") or "")
+    if confidence == "미해결" or "답변 없음" in content:
+        return 2.0
+    if confidence == "단일제보":
+        return 0.5
+    return 0.0
+
+
+def _candidate_source_group(source: dict) -> str:
+    collection = str(source.get("collection") or "")
+    source_type = str(source.get("source_type") or "")
+    if collection == "qna":
+        return "qna"
+    if collection == "kb" or source_type == "aark":
+        return "aark"
+    if collection == "rules" or collection.startswith("rules-") or source_type == "rules":
+        return "rules"
+    return "other"
+
+
+def _balance_candidate_pool(sources: list[dict], limit: int) -> list[dict]:
+    """Keep all strong sources eligible while diversifying the reranker pool."""
+    if len(sources) <= limit:
+        return sources
+    grouped: dict[str, list[dict]] = {}
+    for source in sources:
+        grouped.setdefault(_candidate_source_group(source), []).append(source)
+    nonempty = [items for items in grouped.values() if items]
+    if len(nonempty) <= 1:
+        return sources[:limit]
+
+    quota = max(1, limit // len(nonempty))
+    selected: list[dict] = []
+    selected_ids: set[int] = set()
+    for items in nonempty:
+        for source in items[:quota]:
+            selected.append(source)
+            selected_ids.add(id(source))
+
+    for source in sources:
+        if len(selected) >= limit:
+            break
+        if id(source) not in selected_ids:
+            selected.append(source)
+            selected_ids.add(id(source))
+    selected.sort(key=lambda item: item.get("score", 0), reverse=True)
+    return selected[:limit]
+
+
 async def _rerank_results(query: str, sources: list[dict], limit: int = 7) -> list[dict]:
     """Re-rank search results using LLM-based relevance scoring."""
     if not sources or len(sources) <= 1:
@@ -1396,6 +1598,7 @@ async def _rerank_results(query: str, sources: list[dict], limit: int = 7) -> li
 
     prompt = f"""다음 검색 결과가 사용자의 질문에 직접 답하는 정도를 0-10점으로 평가하세요.
 문서 종류나 명목상 권위는 점수에 반영하지 마세요. 단어만 겹치고 종목·부품·조건이 다르면 낮게 평가하세요.
+AARK의 `미해결` 또는 `답변 없음` 자료가 질문을 반복할 뿐 직접 답하지 않으면 낮게 평가하세요.
 JSON 배열로만 응답하세요: [{{"index": 0, "score": 8}}, ...]
 
 질문: {query}
@@ -1437,7 +1640,7 @@ JSON 배열로만 응답하세요: [{{"index": 0, "score": 8}}, ...]
         # Filter low-relevance results and re-sort
         reranked = []
         for i, s in enumerate(sources):
-            relevance = score_map.get(i, 0)
+            relevance = max(0.0, score_map.get(i, 0) - _aark_evidence_penalty(s))
             if relevance >= 3:
                 item = dict(s)
                 item["rerank_score"] = relevance
@@ -1545,6 +1748,8 @@ async def search_and_stream(
             if previous is None or source.get("score", 0) > previous.get("score", 0):
                 merged[key] = source
         sources = sorted(merged.values(), key=lambda item: item.get("score", 0), reverse=True)
+        sources = _balance_candidate_pool(sources, max(limit * 4, 24))
+        retrieval_meta["candidate_count"] = len(sources)
         combined_failures = {
             **retrieval_meta.get("failed_collections", {}),
             **{f"original:{key}": value for key, value in original_meta.get("failed_collections", {}).items()},
@@ -1557,7 +1762,13 @@ async def search_and_stream(
             retrieval_meta["status"] = "failed"
 
     if competition:
-        sources = [source for source in sources if _source_matches_competition(source, competition)]
+        effective_competition = retrieval_meta.get("query_hints", {}).get("competition_filter")
+        alternatives = {effective_competition} if effective_competition else set()
+        sources = [
+            source
+            for source in sources
+            if _source_matches_competition(source, competition, alternatives)
+        ]
 
     # Re-rank results for relevance
     retrieval_ms = round((time.monotonic() - retrieval_started) * 1000)
