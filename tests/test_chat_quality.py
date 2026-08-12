@@ -292,7 +292,7 @@ def test_existing_document_type_collection_keeps_hard_filter(monkeypatch):
     chat._search_cache.clear()
 
 
-def test_candidate_pool_is_balanced_before_reranking():
+def test_candidate_pool_caps_dominant_source_without_guaranteeing_equal_slots():
     sources = []
     for index in range(24):
         sources.append({"collection": "qna", "score": 1.0 - index / 1000})
@@ -307,7 +307,18 @@ def test_candidate_pool_is_balanced_before_reranking():
         for group in ("qna", "rules", "aark")
     }
 
-    assert counts == {"qna": 8, "rules": 8, "aark": 8}
+    assert counts == {"qna": 12, "rules": 8, "aark": 4}
+
+
+def test_smart_e_document_type_filter_uses_internal_competition_key():
+    event_key = "rules-smart-e-mobility-event-operation-2026"
+
+    assert chat._effective_rules_document_type(
+        "event-operation",
+        [event_key],
+        "smart_e_mobility",
+        "스마트 e 모빌리티 경기진행규정",
+    ) == "event-operation"
 
 
 def test_aark_unresolved_is_searched_but_penalized():

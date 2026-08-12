@@ -776,6 +776,7 @@ def search_with_metadata(
                 per_collection[col_name] = []
 
     output = [item for hits in per_collection.values() for item in hits]
+    adjusted_output: list[dict] = []
     for item in output:
         if item.get("source_type") == "rules":
             item["lexical_boost"] = _compute_rule_query_boost(search_query, item)
@@ -783,7 +784,10 @@ def search_with_metadata(
         aark_penalty = _aark_evidence_penalty(item)
         if aark_penalty:
             item["score"] -= aark_penalty * 0.04
-    output.sort(key=lambda item: item["score"], reverse=True)
+            if item["score"] < min_score:
+                continue
+        adjusted_output.append(item)
+    output = sorted(adjusted_output, key=lambda item: item["score"], reverse=True)
 
     # Deduplicate over the complete candidate pool, then backfill until the
     # reranker pool is full.  This avoids returning fewer documents merely
@@ -1397,7 +1401,10 @@ def _effective_rules_document_type(
             continue
         if meta.get("document_type_key") != document_type:
             continue
-        source_competition = normalize_competition_key(str(meta.get("competition") or ""))
+        source_competition = str(
+            meta.get("competition_key")
+            or normalize_competition_key(str(meta.get("competition") or ""))
+        )
         if competition_key and source_competition not in {competition_key, "other"}:
             continue
         return document_type
@@ -1558,32 +1565,24 @@ def _candidate_source_group(source: dict) -> str:
 
 
 def _balance_candidate_pool(sources: list[dict], limit: int) -> list[dict]:
-    """Keep all strong sources eligible while diversifying the reranker pool."""
+    """Cap a dominant source without guaranteeing slots to weak sources."""
     if len(sources) <= limit:
         return sources
-    grouped: dict[str, list[dict]] = {}
-    for source in sources:
-        grouped.setdefault(_candidate_source_group(source), []).append(source)
-    nonempty = [items for items in grouped.values() if items]
-    if len(nonempty) <= 1:
+    groups = {_candidate_source_group(source) for source in sources}
+    if len(groups) <= 1:
         return sources[:limit]
-
-    quota = max(1, limit // len(nonempty))
+    per_group_cap = max(8, (limit + 1) // 2)
+    counts: dict[str, int] = {}
     selected: list[dict] = []
-    selected_ids: set[int] = set()
-    for items in nonempty:
-        for source in items[:quota]:
-            selected.append(source)
-            selected_ids.add(id(source))
-
     for source in sources:
         if len(selected) >= limit:
             break
-        if id(source) not in selected_ids:
-            selected.append(source)
-            selected_ids.add(id(source))
-    selected.sort(key=lambda item: item.get("score", 0), reverse=True)
-    return selected[:limit]
+        group = _candidate_source_group(source)
+        if counts.get(group, 0) >= per_group_cap:
+            continue
+        selected.append(source)
+        counts[group] = counts.get(group, 0) + 1
+    return selected
 
 
 async def _rerank_results(query: str, sources: list[dict], limit: int = 7) -> list[dict]:
