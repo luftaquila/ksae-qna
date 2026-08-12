@@ -116,16 +116,16 @@ RULE_COLLECTION_NAMES = tuple(
 CONFIDENCE_LEVELS = ("합의됨", "다수의견", "단일제보", "미해결")
 
 
-def _get_available_collections() -> set[str] | None:
-    """Return currently available vector-collections, or None if unknown."""
+def _get_available_collections() -> set[str]:
+    """Return available vector collections, defaulting safely to none."""
     if _qdrant is None:
-        return None
+        return set()
     try:
         response = _qdrant.get_collections()
         return {col.name for col in response.collections}
     except Exception:
-        logger.warning("Unable to fetch qdrant collections; using config defaults for registry")
-        return None
+        logger.warning("Unable to fetch qdrant collections; exposing stable sources only")
+        return set()
 
 
 def _is_active_rule_collection_key(
@@ -141,8 +141,6 @@ def _is_active_rule_collection_key(
 
     if available_collections is None:
         available_collections = _get_available_collections()
-    if available_collections is None:
-        return True
     return meta["collection"] in available_collections
 
 
@@ -1310,11 +1308,14 @@ def _build_rules_filter(competition: str | None, document_type: str | None) -> m
     conditions: list[Any] = []
     if competition:
         normalized_competition = normalize_competition_key(competition)
-        competition_values = (normalized_competition, "other") if normalized_competition != "other" else ("other",)
+        if normalized_competition == "other":
+            competition_match: Any = models.MatchValue(value="other")
+        else:
+            competition_match = models.MatchAny(any=[normalized_competition, "other"])
         conditions.append(
             models.FieldCondition(
                 key="competition",
-                match=models.MatchAny(any=list(competition_values)),
+                match=competition_match,
             )
         )
     if document_type:

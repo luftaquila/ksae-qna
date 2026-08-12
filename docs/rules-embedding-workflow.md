@@ -11,14 +11,14 @@
 
 - 수집 PDF: 9개
 - 대상은 모두 “규정 본문”만 사용, `규정 제정안/개정안`은 제외
-- 실제 업로드 운영 대상 컬렉션:  
-  - `ksae-rules-baja-event-operation-2026-v2`  
-  - `ksae-rules-baja-vehicle-technical-2026-v2`  
-  - `ksae-rules-formula-event-operation-2026-v2`  
-  - `ksae-rules-formula-vehicle-technical-2026-v2`  
-  - `ksae-rules-other-competition-rules-2026-v2`  
-  - `ksae-rules-other-other-2026-v2`  
-  - `ksae-rules-smart-e-mobility-event-operation-2026-v2`  
+- 실제 업로드 운영 대상 컬렉션:
+  - `ksae-rules-baja-event-operation-2026-v2`
+  - `ksae-rules-baja-vehicle-technical-2026-v2`
+  - `ksae-rules-formula-event-operation-2026-v2`
+  - `ksae-rules-formula-vehicle-technical-2026-v2`
+  - `ksae-rules-other-competition-rules-2026-v2`
+  - `ksae-rules-other-other-2026-v2`
+  - `ksae-rules-smart-e-mobility-event-operation-2026-v2`
   - `ksae-rules-smart-e-mobility-vehicle-technical-2026-v2`
 
 ### 현재 수집된 문서명(한국어)
@@ -153,9 +153,9 @@ python main.py --qdrant-api-key "$QDRANT_API_KEY" --qdrant-url https://vectordb.
   - 조/항 참조가 있으면 그 번호가 텍스트 본문에 실제 존재
   - 동일 문서 내 서로 다른 규칙(안전 vs 심사/기술)이 섞여 상위 노출되지 않음
 - 문서유형별 예시 쿼리 스위트(각 10~20개)로 주 1회 점검
-  - 차량기술: `배터리`, `안전장치`, `전장`, `차량무게`  
-  - 경기진행: `개회`, `점수`, `타이밍`, `심사절차`  
-  - 대회운영: `접수`, `경기 일정`, `제재`  
+  - 차량기술: `배터리`, `안전장치`, `전장`, `차량무게`
+  - 경기진행: `개회`, `점수`, `타이밍`, `심사절차`
+  - 대회운영: `접수`, `경기 일정`, `제재`
   - 발표/심사: `기술부문`, `심사 기준`, `사전심사`
 
 ## 6. 라이브 반영 체크리스트
