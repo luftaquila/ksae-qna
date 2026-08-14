@@ -93,7 +93,9 @@ test("chat keeps the original welcome copy", async ({ page }) => {
 test("signed-in users can open my page from their profile", async ({ page }) => {
   await installChatMocks(page);
   await page.goto("/static/index.html");
-  await expect(page.getByRole("link", { name: "김피트" })).toHaveAttribute("href", "/account");
+  const accountLink = page.getByRole("link", { name: "김피트 마이페이지" });
+  await expect(accountLink).toHaveAttribute("href", "/account");
+  await expect(accountLink.locator(".profile-avatar")).toHaveText("김");
 });
 
 for (const viewport of [

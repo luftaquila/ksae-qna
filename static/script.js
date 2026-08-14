@@ -59,9 +59,9 @@ function renderAuthUI() {
     queryInput.disabled = false;
     sendBtn.disabled = false;
 
-    const imgTag = currentUser.picture
+    const avatar = currentUser.picture
       ? `<img src="${escapeAttr(currentUser.picture)}" class="profile-img" alt="" referrerpolicy="no-referrer">`
-      : "";
+      : `<span class="profile-avatar" aria-hidden="true">${escapeHtml(Array.from(currentUser.name || "?")[0])}</span>`;
     const adminLink = currentUser.is_admin
       ? `<a href="/admin" class="profile-admin-link">관리자</a>`
       : "";
@@ -70,8 +70,8 @@ function renderAuthUI() {
 
     authArea.innerHTML = `
       <div class="profile-info">
-        <a href="/account" class="profile-account-link" title="마이페이지">
-          ${imgTag}
+        <a href="/account" class="profile-account-link" aria-label="${escapeAttr(currentUser.name)} 마이페이지" title="마이페이지">
+          ${avatar}
           <span class="profile-name">${escapeHtml(currentUser.name)}</span>
         </a>
         ${adminLink}

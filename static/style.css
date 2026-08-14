@@ -396,11 +396,26 @@ header {
   text-decoration: none;
 }
 
-.profile-img {
+.profile-img,
+.profile-avatar {
   width: 30px;
   height: 30px;
+  flex: 0 0 auto;
   border-radius: 50%;
+}
+
+.profile-img {
   object-fit: cover;
+}
+
+.profile-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: var(--color-primary);
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .profile-admin-link {
@@ -1057,6 +1072,7 @@ header {
 
 @media (max-width: 700px) {
   header { flex-basis: 56px; padding: 0 12px; }
+  .header-top { gap: 4px; }
   .header-leading,
   .header-actions { gap: 7px; }
   .header-brand { gap: 8px; }
