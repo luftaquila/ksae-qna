@@ -15,6 +15,18 @@ let currentSessionId = null;
 let lowCreditThreshold = 5;
 let unlimitedCredits = false;
 
+const GOOGLE_ICON = `
+  <svg class="google-icon" viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"></path>
+    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"></path>
+    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"></path>
+    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"></path>
+  </svg>`;
+
+function googleLoginButton() {
+  return `<a href="/api/auth/login" class="login-btn google-login">${GOOGLE_ICON}<span>Google 로그인</span></a>`;
+}
+
 // ---------------------------------------------------------------------------
 // Mobile sidebar
 // ---------------------------------------------------------------------------
@@ -93,7 +105,7 @@ function renderAuthUI() {
     queryInput.disabled = true;
     sendBtn.disabled = true;
 
-    authArea.innerHTML = `<a href="/api/auth/login" class="login-btn google-login">Google 로그인</a>`;
+    authArea.innerHTML = googleLoginButton();
   }
   showWelcome();
 }
@@ -508,6 +520,7 @@ function renderAnswerContent(answerEl, markdown) {
 }
 
 function appendMessage(role, text) {
+  chat.classList.remove("welcome-mode");
   const el = document.createElement("div");
   el.className = `msg ${role}`;
   el.textContent = text;
@@ -516,6 +529,7 @@ function appendMessage(role, text) {
 }
 
 function appendAssistantShell() {
+  chat.classList.remove("welcome-mode");
   const el = document.createElement("div");
   el.className = "msg assistant";
   el.innerHTML = `
@@ -665,20 +679,29 @@ function buildWelcomeSourceRows() {
 
 function showWelcome() {
   // Don't overwrite if there are actual messages displayed
-  if (chat.querySelector(".msg")) return;
+  if (chat.querySelector(".msg")) {
+    chat.classList.remove("welcome-mode");
+    return;
+  }
+
+  chat.classList.add("welcome-mode");
 
   const loginHtml = currentUser
     ? ""
     : `<div class="welcome-login">
         <p>질문하려면 로그인하세요</p>
-        <a href="/api/auth/login" class="login-btn google-login">Google 로그인</a>
+        ${googleLoginButton()}
       </div>`;
 
   chat.innerHTML = `
     <div class="welcome">
-      <img class="welcome-logo" src="/static/logo.svg" alt="">
-      <h2 class="welcome-title">PitBot</h2>
-      <p class="welcome-subtitle">자작자동차 규정 및 Q&amp;A 챗봇</p>
+      <div class="welcome-heading">
+        <img class="welcome-logo" src="/static/logo.svg" alt="">
+        <div class="welcome-heading-copy">
+          <h2 class="welcome-title">PitBot</h2>
+          <p class="welcome-subtitle">자작자동차 규정 및 Q&amp;A 챗봇</p>
+        </div>
+      </div>
       <div class="welcome-items">
         <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#9889;</span>
@@ -686,7 +709,7 @@ function showWelcome() {
         </div>
         <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#128218;</span>
-          <span>입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.
+          <span>입력창 상단에서 답변에 사용할 데이터를 선택합니다.
             <ul class="welcome-chip-list">${buildWelcomeSourceRows()}</ul>
           </span>
         </div>

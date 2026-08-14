@@ -63,7 +63,7 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   await expect(page.locator(".welcome-subtitle")).toHaveText("자작자동차 규정 및 Q&A 챗봇");
   await expect(page.locator(".welcome-items")).toContainText("질문 1회당 이용권 1장이 차감됩니다.");
   await expect(page.locator(".welcome-items")).toContainText("매월 1일마다 이용권이 무료로 다시 충전됩니다.");
-  await expect(page.locator(".welcome-items")).toContainText("입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.");
+  await expect(page.locator(".welcome-items")).toContainText("입력창 상단에서 답변에 사용할 데이터를 선택합니다.");
   await expect(page.locator(".welcome-chip-list")).toContainText("규정 — 2026 대회 규정 전체 (Formula/Baja/EV)");
   await expect(page.locator(".welcome-chip-list")).toContainText("Q&A — KSAE Q&A 게시판 질의응답");
   await expect(page.locator(".welcome-chip-list")).toContainText("AARK — AARK 익명톡방 (2025년 2월 ~ 2026년 7월)");
@@ -165,26 +165,32 @@ for (const viewport of [
     await page.goto("/static/index.html");
     await expect(page.locator(".welcome-warn")).toBeVisible();
 
-    const overflow = await page.locator(".welcome").evaluate((element) => ({
+    const overflow = await page.locator(".chat").evaluate((element) => ({
       horizontal: element.scrollWidth - element.clientWidth,
       vertical: element.scrollHeight - element.clientHeight,
+      scrollTop: element.scrollTop,
+      overflowY: getComputedStyle(element).overflowY,
     }));
     expect(overflow.horizontal).toBeLessThanOrEqual(1);
     expect(overflow.vertical).toBeLessThanOrEqual(1);
+    expect(overflow.scrollTop).toBe(0);
+    expect(overflow.overflowY).toBe("hidden");
 
-    await page.locator(".welcome-warn").scrollIntoViewIfNeeded();
-    const positions = await page.locator(".welcome-warn").evaluate((element) => {
-      const notice = element.getBoundingClientRect();
+    const positions = await page.locator(".welcome").evaluate((element) => {
+      const welcome = element.getBoundingClientRect();
       const chat = element.closest(".chat").getBoundingClientRect();
       return {
-        noticeTop: notice.top,
-        noticeBottom: notice.bottom,
+        welcomeTop: welcome.top,
+        welcomeBottom: welcome.bottom,
         chatTop: chat.top,
         chatBottom: chat.bottom,
+        topSpace: welcome.top - chat.top,
+        bottomSpace: chat.bottom - welcome.bottom,
       };
     });
-    expect(positions.noticeTop).toBeGreaterThanOrEqual(positions.chatTop - 1);
-    expect(positions.noticeBottom).toBeLessThanOrEqual(positions.chatBottom + 1);
+    expect(positions.welcomeTop).toBeGreaterThanOrEqual(positions.chatTop - 1);
+    expect(positions.welcomeBottom).toBeLessThanOrEqual(positions.chatBottom + 1);
+    expect(Math.abs(positions.topSpace - positions.bottomSpace)).toBeLessThanOrEqual(2);
   });
 }
 
