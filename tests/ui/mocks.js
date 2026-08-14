@@ -62,6 +62,38 @@ export const adminModels = [
   },
 ];
 
+export const adminOverview = {
+  period: "30d",
+  users: { total_users: 28, active_users: 17, new_users: 6, current_credits: 412, low_credit_users: 4 },
+  activity: { questions: 186, answers: 181, credits_used: 186, credits_refunded: 5 },
+  reliability: {
+    tracked_turns: 186,
+    successful_turns: 183,
+    fallback_turns: 7,
+    failed_turns: 3,
+    pending_turns: 0,
+    degraded_retrieval_turns: 4,
+    avg_first_token_ms: 1280,
+    avg_total_ms: 8340,
+    success_rate: 98.4,
+    fallback_rate: 3.8,
+  },
+  tokens: { input_tokens: 15200, output_tokens: 4730, thinking_tokens: 2520, total_tokens: 22450, estimated_cost_usd: 0.42 },
+  models: [
+    { model: "gemini-3-flash", label: "Gemini Flash (Latest)", message_count: 176, input_tokens: 14200, output_tokens: 4400, thinking_tokens: 2300, estimated_cost_usd: 0.31 },
+    { model: "gemini-3-pro", label: "Gemini Pro (Latest)", message_count: 7, input_tokens: 1000, output_tokens: 330, thinking_tokens: 220, estimated_cost_usd: 0.11 },
+  ],
+  daily: [
+    { date: "2026-08-01", questions: 8, active_users: 5 },
+    { date: "2026-08-02", questions: 12, active_users: 7 },
+    { date: "2026-08-03", questions: 6, active_users: 4 },
+    { date: "2026-08-04", questions: 15, active_users: 9 },
+    { date: "2026-08-05", questions: 9, active_users: 6 },
+    { date: "2026-08-06", questions: 18, active_users: 10 },
+    { date: "2026-08-07", questions: 14, active_users: 8 },
+  ],
+};
+
 export async function installChatMocks(page) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -101,6 +133,7 @@ export async function installAdminMocks(page) {
     const url = new URL(request.url());
     const path = url.pathname;
     if (path === "/api/admin/check") return route.fulfill({ json: { admin: true, email: "admin@example.com" } });
+    if (path === "/api/admin/overview") return route.fulfill({ json: { overview: { ...adminOverview, period: url.searchParams.get("period") || "30d" } } });
     if (path === "/api/admin/users") return route.fulfill({ json: { users } });
     if (path === "/api/admin/models") return route.fulfill({ json: { models: adminModels } });
     if (path === "/api/admin/settings" && request.method() === "GET") return route.fulfill({ json: { settings: { default_credits: "15", monthly_refill_credits: "20", low_credit_threshold: "5", unlimited_credits: "false" } } });

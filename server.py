@@ -47,6 +47,7 @@ from src.auth import (
     get_recent_messages,
     get_site_setting,
     get_all_users_token_usage_by_model,
+    get_admin_overview_stats,
     get_user_token_usage_by_model,
     get_or_create_user,
     get_user_by_google_id,
@@ -71,6 +72,7 @@ from src.auth import (
 from src.chat import (
     CHAT_CREDIT_COST,
     FALLBACK_MODEL_KEY,
+    MODEL_CONFIG,
     PRIMARY_MODEL_KEY,
     PROMPT_VERSION,
     get_public_collections,
@@ -779,6 +781,39 @@ async def admin_users(request: Request):
     for u in users:
         u["model_usage"] = usage_map.get(u["id"], [])
     return {"users": users}
+
+
+@app.get("/api/admin/overview")
+async def admin_overview(request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    period = request.query_params.get("period", "30d")
+    period_days = {"7d": 7, "30d": 30, "all": None}
+    if period not in period_days:
+        return JSONResponse({"error": "조회 기간이 올바르지 않습니다"}, status_code=400)
+    try:
+        low_threshold = max(0, int(get_site_setting("low_credit_threshold")))
+    except (TypeError, ValueError):
+        low_threshold = 5
+    overview = get_admin_overview_stats(
+        period_days[period],
+        low_credit_threshold=low_threshold,
+    )
+    total_cost = 0.0
+    for usage in overview["models"]:
+        config = MODEL_CONFIG.get(usage["model"], MODEL_CONFIG[PRIMARY_MODEL_KEY])
+        pricing = config["pricing"]
+        cost = (
+            usage["input_tokens"] * pricing["input"]
+            + usage["output_tokens"] * pricing["output"]
+            + usage["thinking_tokens"] * pricing["thinking"]
+        ) / 1_000_000
+        usage["label"] = config["label"] if usage["model"] in MODEL_CONFIG else "미기록 모델"
+        usage["estimated_cost_usd"] = round(cost, 6)
+        total_cost += cost
+    overview["tokens"]["estimated_cost_usd"] = round(total_cost, 6)
+    overview["period"] = period
+    return {"overview": overview}
 
 
 @app.patch("/api/admin/users/{user_id}/credits")

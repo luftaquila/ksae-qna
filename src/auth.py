@@ -1058,6 +1058,167 @@ def list_all_users() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_admin_overview_stats(
+    days: int | None = 30,
+    *,
+    low_credit_threshold: int = 5,
+) -> dict:
+    """Return period-aware service metrics for the admin dashboard."""
+    if days is not None and days not in (7, 30):
+        raise ValueError("days must be 7, 30, or None")
+
+    period_filter = "" if days is None else " AND {column} >= datetime('now', ?)"
+    period_params: tuple[str, ...] = () if days is None else (f"-{days} days",)
+
+    def period_sql(column: str) -> str:
+        return period_filter.format(column=column)
+
+    conn = _get_conn()
+    users = conn.execute(
+        """
+        SELECT COUNT(*) AS total_users,
+               COALESCE(SUM(credits), 0) AS current_credits,
+               COALESCE(SUM(CASE WHEN credits <= ? THEN 1 ELSE 0 END), 0) AS low_credit_users
+          FROM users
+        """,
+        (low_credit_threshold,),
+    ).fetchone()
+    new_users = conn.execute(
+        f"SELECT COUNT(*) AS count FROM users WHERE 1=1{period_sql('created_at')}",
+        period_params,
+    ).fetchone()["count"]
+    active_users = conn.execute(
+        f"""
+        SELECT COUNT(DISTINCT s.user_id) AS count
+          FROM messages m
+          JOIN sessions s ON s.id = m.session_id
+         WHERE m.role = 'user'{period_sql('m.created_at')}
+        """,
+        period_params,
+    ).fetchone()["count"]
+    activity = conn.execute(
+        f"""
+        SELECT COALESCE(SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END), 0) AS questions,
+               COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN 1 ELSE 0 END), 0) AS answers,
+               COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN m.input_tokens ELSE 0 END), 0) AS input_tokens,
+               COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN m.output_tokens ELSE 0 END), 0) AS output_tokens,
+               COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN m.thinking_tokens ELSE 0 END), 0) AS thinking_tokens
+          FROM messages m
+          JOIN sessions s ON s.id = m.session_id
+         WHERE 1=1{period_sql('m.created_at')}
+        """,
+        period_params,
+    ).fetchone()
+    credits = conn.execute(
+        f"""
+        SELECT COALESCE(SUM(CASE WHEN type = 'usage' THEN ABS(amount) ELSE 0 END), 0) AS used,
+               COALESCE(SUM(CASE WHEN type = 'refund' AND amount > 0 THEN amount ELSE 0 END), 0) AS refunded
+          FROM token_transactions
+         WHERE 1=1{period_sql('created_at')}
+        """,
+        period_params,
+    ).fetchone()
+    turns = conn.execute(
+        f"""
+        SELECT COUNT(*) AS tracked_turns,
+               COALESCE(SUM(CASE WHEN status IN ('success', 'success_fallback') THEN 1 ELSE 0 END), 0) AS successful_turns,
+               COALESCE(SUM(CASE WHEN status = 'success_fallback' THEN 1 ELSE 0 END), 0) AS fallback_turns,
+               COALESCE(SUM(CASE WHEN status IN ('error', 'partial_error') THEN 1 ELSE 0 END), 0) AS failed_turns,
+               COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending_turns,
+               COALESCE(SUM(CASE WHEN retrieval_status IN ('partial', 'failed') THEN 1 ELSE 0 END), 0) AS degraded_retrieval_turns,
+               ROUND(AVG(first_token_ms), 0) AS avg_first_token_ms,
+               ROUND(AVG(total_ms), 0) AS avg_total_ms
+          FROM chat_turns
+         WHERE 1=1{period_sql('created_at')}
+        """,
+        period_params,
+    ).fetchone()
+    model_rows = conn.execute(
+        f"""
+        SELECT m.model,
+               COUNT(*) AS message_count,
+               COALESCE(SUM(m.input_tokens), 0) AS input_tokens,
+               COALESCE(SUM(m.output_tokens), 0) AS output_tokens,
+               COALESCE(SUM(m.thinking_tokens), 0) AS thinking_tokens
+          FROM messages m
+          JOIN sessions s ON s.id = m.session_id
+         WHERE m.role = 'assistant'
+           AND (m.input_tokens IS NOT NULL OR m.output_tokens IS NOT NULL OR m.thinking_tokens IS NOT NULL)
+           {period_sql('m.created_at')}
+         GROUP BY m.model
+         ORDER BY message_count DESC, m.model
+        """,
+        period_params,
+    ).fetchall()
+
+    daily_days = 14 if days is None else min(days, 14)
+    daily_rows = conn.execute(
+        """
+        SELECT date(m.created_at, '+9 hours') AS date,
+               COUNT(*) AS questions,
+               COUNT(DISTINCT s.user_id) AS active_users
+          FROM messages m
+          JOIN sessions s ON s.id = m.session_id
+         WHERE m.role = 'user'
+           AND m.created_at >= datetime('now', ?)
+         GROUP BY date(m.created_at, '+9 hours')
+         ORDER BY date
+        """,
+        (f"-{daily_days - 1} days",),
+    ).fetchall()
+    conn.close()
+
+    completed_turns = turns["tracked_turns"] - turns["pending_turns"]
+    success_rate = (
+        round(turns["successful_turns"] * 100 / completed_turns, 1)
+        if completed_turns > 0
+        else None
+    )
+    fallback_rate = (
+        round(turns["fallback_turns"] * 100 / turns["successful_turns"], 1)
+        if turns["successful_turns"] > 0
+        else None
+    )
+    daily_map = {row["date"]: dict(row) for row in daily_rows}
+    kst = timezone(timedelta(hours=9))
+    today = datetime.now(kst).date()
+    daily = []
+    for offset in reversed(range(daily_days)):
+        day = (today - timedelta(days=offset)).isoformat()
+        daily.append(daily_map.get(day, {"date": day, "questions": 0, "active_users": 0}))
+
+    return {
+        "users": {
+            **dict(users),
+            "new_users": new_users,
+            "active_users": active_users,
+        },
+        "activity": {
+            "questions": activity["questions"],
+            "answers": activity["answers"],
+            "credits_used": credits["used"],
+            "credits_refunded": credits["refunded"],
+        },
+        "reliability": {
+            **dict(turns),
+            "success_rate": success_rate,
+            "fallback_rate": fallback_rate,
+        },
+        "tokens": {
+            "input_tokens": activity["input_tokens"],
+            "output_tokens": activity["output_tokens"],
+            "thinking_tokens": activity["thinking_tokens"],
+            "total_tokens": (
+                activity["input_tokens"]
+                + activity["output_tokens"]
+                + activity["thinking_tokens"]
+            ),
+        },
+        "models": [dict(row) for row in model_rows],
+        "daily": daily,
+    }
+
+
 def get_all_users_token_usage_by_model() -> dict[int, list[dict]]:
     """Return per-model token usage for all users, keyed by user_id."""
     conn = _get_conn()

@@ -11,6 +11,7 @@ let currentConvSessionId = null;
 let lowCreditThreshold = 5;
 let sortColumn = null;
 let sortDirection = "asc";
+let overviewPeriod = "30d";
 
 // ---------------------------------------------------------------------------
 // Theme (reused from script.js)
@@ -93,7 +94,6 @@ async function loadUsers() {
     allUsers = [];
   }
   renderUsers();
-  renderUsageSummary();
   populateUserFilter();
 }
 
@@ -191,59 +191,124 @@ function renderUsers(filter = "") {
     .join("");
 }
 
-function renderUsageSummary() {
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString("ko-KR");
+}
+
+function formatDuration(value) {
+  if (value === null || value === undefined) return "—";
+  const milliseconds = Number(value);
+  return milliseconds < 1000
+    ? `${formatNumber(milliseconds)}ms`
+    : `${(milliseconds / 1000).toFixed(1)}초`;
+}
+
+function formatUsd(value) {
+  const cost = Number(value || 0);
+  return cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(2)}`;
+}
+
+function renderAdminOverview(overview) {
   const el = document.getElementById("usage-summary");
   if (!el) return;
-
-  // Aggregate model_usage across all users
-  const modelMap = {};
-  for (const u of allUsers) {
-    for (const mu of (u.model_usage || [])) {
-      const key = mu.model || "(미기록)";
-      if (!modelMap[key]) modelMap[key] = { input: 0, output: 0, thinking: 0, count: 0, model: mu.model };
-      modelMap[key].input += mu.input_tokens;
-      modelMap[key].output += mu.output_tokens;
-      modelMap[key].thinking += mu.thinking_tokens;
-      modelMap[key].count += mu.message_count;
-    }
-  }
-
-  const models = Object.keys(modelMap).sort();
-  if (!models.length) {
-    el.innerHTML = "";
-    return;
-  }
-
-  let totalCost = 0;
-  const cards = models.map((key) => {
-    const m = modelMap[key];
-    const p = (m.model && MODEL_PRICING[m.model]) || DEFAULT_PRICING;
-    const cost = (m.input * p.input + m.output * p.output + m.thinking * p.thinking) / 1_000_000;
-    totalCost += cost;
-    const costStr = cost < 0.01 ? "$" + cost.toFixed(4) : "$" + cost.toFixed(2);
-    return `<div class="summary-card">
-      <div class="summary-card-title">${escapeHtml(key)}</div>
-      <div class="summary-card-stats">
-        <span>IN ${m.input.toLocaleString()}</span>
-        <span>OUT ${m.output.toLocaleString()}</span>
-        <span>THK ${m.thinking.toLocaleString()}</span>
-      </div>
-      <div class="summary-card-footer">
-        <span class="summary-card-count">${m.count.toLocaleString()}회</span>
-        <span class="summary-card-cost">${costStr}</span>
-      </div>
+  const users = overview.users || {};
+  const activity = overview.activity || {};
+  const reliability = overview.reliability || {};
+  const tokens = overview.tokens || {};
+  const activeUsers = Number(users.active_users || 0);
+  const questions = Number(activity.questions || 0);
+  const questionsPerUser = activeUsers ? (questions / activeUsers).toFixed(1) : "—";
+  const successRate = reliability.success_rate === null || reliability.success_rate === undefined
+    ? "—"
+    : `${reliability.success_rate}%`;
+  const fallbackRate = reliability.fallback_rate === null || reliability.fallback_rate === undefined
+    ? "—"
+    : `${reliability.fallback_rate}%`;
+  const modelCards = (overview.models || []).map((model) => `
+    <article class="overview-model-card">
+      <div><h4>${escapeHtml(model.label || model.model || "미기록 모델")}</h4><span>${formatNumber(model.message_count)}회 응답</span></div>
+      <dl>
+        <div><dt>입력</dt><dd>${formatNumber(model.input_tokens)}</dd></div>
+        <div><dt>출력</dt><dd>${formatNumber(model.output_tokens)}</dd></div>
+        <div><dt>추론</dt><dd>${formatNumber(model.thinking_tokens)}</dd></div>
+        <div><dt>추정 비용</dt><dd>${formatUsd(model.estimated_cost_usd)}</dd></div>
+      </dl>
+    </article>
+  `).join("") || '<p class="overview-empty">선택한 기간의 모델 사용 기록이 없습니다.</p>';
+  const maxQuestions = Math.max(1, ...(overview.daily || []).map((day) => Number(day.questions || 0)));
+  const dailyBars = (overview.daily || []).map((day) => {
+    const questionCount = Number(day.questions || 0);
+    const height = questionCount ? Math.max(8, Math.round(questionCount * 100 / maxQuestions)) : 2;
+    const shortDate = day.date.slice(5).replace("-", "/");
+    return `<div class="activity-day" title="${escapeAttr(day.date)} · 질문 ${questionCount}회 · 사용자 ${formatNumber(day.active_users)}명">
+      <span class="activity-value">${questionCount || ""}</span>
+      <span class="activity-bar" style="height:${height}%"></span>
+      <span class="activity-date" data-short="${escapeAttr(day.date.slice(-2))}">${shortDate}</span>
     </div>`;
   }).join("");
 
-  const totalCostStr = totalCost < 0.01 ? "$" + totalCost.toFixed(4) : "$" + totalCost.toFixed(2);
   el.innerHTML = `
-    <div class="summary-cards">${cards}</div>
-    <div class="summary-total">
-      <span>총 비용</span>
-      <span class="summary-total-cost">${totalCostStr}</span>
+    <div class="overview-kpi-grid">
+      <article class="overview-card">
+        <h3>사용자</h3><p class="overview-value">${formatNumber(users.total_users)}<span>명</span></p>
+        <dl><div><dt>기간 활성</dt><dd>${formatNumber(users.active_users)}명</dd></div><div><dt>신규 가입</dt><dd>${formatNumber(users.new_users)}명</dd></div></dl>
+      </article>
+      <article class="overview-card">
+        <h3>질문과 답변</h3><p class="overview-value">${formatNumber(activity.questions)}<span>회 질문</span></p>
+        <dl><div><dt>저장된 답변</dt><dd>${formatNumber(activity.answers)}회</dd></div><div><dt>활성 사용자당</dt><dd>${questionsPerUser}회</dd></div></dl>
+      </article>
+      <article class="overview-card">
+        <h3>답변 안정성</h3><p class="overview-value">${successRate}<span>성공</span></p>
+        <dl><div><dt>오류</dt><dd>${formatNumber(reliability.failed_turns)}회</dd></div><div><dt>폴백</dt><dd>${formatNumber(reliability.fallback_turns)}회 · ${fallbackRate}</dd></div><div><dt>검색 저하</dt><dd>${formatNumber(reliability.degraded_retrieval_turns)}회</dd></div></dl>
+      </article>
+      <article class="overview-card">
+        <h3>응답 속도</h3><p class="overview-value">${formatDuration(reliability.avg_first_token_ms)}<span>첫 응답</span></p>
+        <dl><div><dt>전체 완료</dt><dd>${formatDuration(reliability.avg_total_ms)}</dd></div><div><dt>추적 요청</dt><dd>${formatNumber(reliability.tracked_turns)}회</dd></div><div><dt>처리 중</dt><dd>${formatNumber(reliability.pending_turns)}회</dd></div></dl>
+      </article>
+      <article class="overview-card">
+        <h3>이용권</h3><p class="overview-value">${formatNumber(activity.credits_used)}<span>장 사용</span></p>
+        <dl><div><dt>환불</dt><dd>${formatNumber(activity.credits_refunded)}장</dd></div><div><dt>현재 총 잔액</dt><dd>${formatNumber(users.current_credits)}장</dd></div><div><dt>부족 사용자</dt><dd>${formatNumber(users.low_credit_users)}명</dd></div></dl>
+      </article>
+      <article class="overview-card">
+        <h3>API 토큰과 비용</h3><p class="overview-value">${formatNumber(tokens.total_tokens)}<span>토큰</span></p>
+        <dl><div><dt>입력 / 출력</dt><dd>${formatNumber(tokens.input_tokens)} / ${formatNumber(tokens.output_tokens)}</dd></div><div><dt>추론</dt><dd>${formatNumber(tokens.thinking_tokens)}</dd></div><div><dt>추정 비용</dt><dd>${formatUsd(tokens.estimated_cost_usd)}</dd></div></dl>
+      </article>
+    </div>
+    <div class="overview-detail-grid">
+      <section class="overview-detail" aria-labelledby="activity-trend-title">
+        <div class="overview-detail-title"><h3 id="activity-trend-title">최근 일별 질문</h3><span>KST · 최대 14일</span></div>
+        <div class="activity-chart" role="img" aria-label="최근 일별 질문 수 막대 그래프">${dailyBars}</div>
+      </section>
+      <section class="overview-detail" aria-labelledby="model-cost-title">
+        <div class="overview-detail-title"><h3 id="model-cost-title">모델·비용 상세</h3><span>공급자 단가 기준 추정</span></div>
+        <div class="overview-models">${modelCards}</div>
+      </section>
     </div>
   `;
 }
+
+async function loadAdminOverview(period = overviewPeriod) {
+  const el = document.getElementById("usage-summary");
+  overviewPeriod = period;
+  document.querySelectorAll(".overview-period button").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.period === period));
+  });
+  if (el) el.setAttribute("aria-busy", "true");
+  try {
+    const res = await fetch(`/api/admin/overview?period=${encodeURIComponent(period)}`);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    renderAdminOverview(data.overview || {});
+  } catch {
+    if (el) el.innerHTML = '<p class="overview-error">운영 통계를 불러오지 못했습니다.</p>';
+  } finally {
+    if (el) el.setAttribute("aria-busy", "false");
+  }
+}
+
+document.querySelectorAll(".overview-period button").forEach((button) => {
+  button.addEventListener("click", () => loadAdminOverview(button.dataset.period));
+});
 
 userSearch.addEventListener("input", () => {
   renderUsers(userSearch.value);
@@ -297,6 +362,7 @@ window.saveCredits = async function (userId) {
       const user = allUsers.find((u) => u.id === userId);
       if (user) user.credits = data.credits;
       renderUsers(userSearch.value);
+      loadAdminOverview();
     } else {
       const err = await res.json();
       alert(err.error || "저장에 실패했습니다");
@@ -834,6 +900,7 @@ document.getElementById("monthly-refill-btn").addEventListener("click", async ()
       const data = await res.json();
       alert(`${data.affected_users}명에게 총 ${data.total_credits}개의 이용권을 충전했습니다.`);
       loadUsers();
+      loadAdminOverview();
     } else {
       const err = await res.json();
       alert(err.error || "즉시 충전에 실패했습니다");
@@ -858,6 +925,7 @@ document.getElementById("bulk-credit-btn").addEventListener("click", async () =>
       const data = await res.json();
       alert(`${data.affected}명의 이용권이 변경되었습니다.`);
       loadUsers();
+      loadAdminOverview();
     } else {
       const err = await res.json();
       alert(err.error || "일괄 변경에 실패했습니다");
@@ -872,7 +940,7 @@ document.getElementById("bulk-credit-btn").addEventListener("click", async () =>
 // ---------------------------------------------------------------------------
 // Per-model pricing (per 1M tokens)
 const MODEL_PRICING = {
-  "gemini-3-flash":    { input: 0.50, output: 3.00,  thinking: 3.00 },
+  "gemini-3-flash":    { input: 1.50, output: 7.50,  thinking: 7.50 },
   "gemini-3-pro":      { input: 2.50, output: 15.00, thinking: 15.00 },
   "claude-sonnet-4.6": { input: 3.00, output: 15.00, thinking: 15.00 },
   "claude-opus-4.6":   { input: 5.00, output: 25.00, thinking: 25.00 },
@@ -943,6 +1011,7 @@ initTheme();
 checkAdmin().then((ok) => {
   if (ok) {
     loadUsers();
+    loadAdminOverview();
     loadModels();
     loadSettings();
   }

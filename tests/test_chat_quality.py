@@ -6,6 +6,8 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from src import chat
 
 
@@ -22,6 +24,70 @@ def test_chat_routing_and_credit_cost_are_fixed():
     assert chat.MODEL_CONFIG[chat.PRIMARY_MODEL_KEY]["thinking_level"] == "high"
     assert chat.CHAT_CREDIT_COST == 1
     assert all(chat.get_effective_credits(key) == 1 for key in chat.ROUTING_MODEL_KEYS)
+
+
+def test_routing_migration_enables_flash_and_pro_once(monkeypatch):
+    model_updates = []
+    site_updates = []
+    monkeypatch.setattr(
+        chat,
+        "get_model_settings_map",
+        lambda: {
+            chat.PRIMARY_MODEL_KEY: {"enabled": True},
+            chat.FALLBACK_MODEL_KEY: {"enabled": False},
+        },
+    )
+    monkeypatch.setattr(chat, "get_site_setting", lambda _key: "")
+    monkeypatch.setattr(
+        chat,
+        "set_model_settings",
+        lambda key, enabled, credits: model_updates.append((key, enabled, credits)),
+    )
+    monkeypatch.setattr(
+        chat,
+        "set_site_setting",
+        lambda key, value: site_updates.append((key, value)),
+    )
+
+    chat.init_model_settings()
+
+    assert model_updates == [
+        (chat.PRIMARY_MODEL_KEY, True, None),
+        (chat.FALLBACK_MODEL_KEY, True, None),
+    ]
+    assert site_updates == [("model_routing_version", chat.MODEL_ROUTING_VERSION)]
+    assert all(chat._model_enabled[key] for key in chat.ROUTING_MODEL_KEYS)
+
+
+def test_completed_routing_migration_preserves_admin_model_toggle(monkeypatch):
+    monkeypatch.setattr(
+        chat,
+        "get_model_settings_map",
+        lambda: {
+            chat.PRIMARY_MODEL_KEY: {"enabled": True},
+            chat.FALLBACK_MODEL_KEY: {"enabled": False},
+        },
+    )
+    monkeypatch.setattr(
+        chat,
+        "get_site_setting",
+        lambda _key: chat.MODEL_ROUTING_VERSION,
+    )
+    monkeypatch.setattr(
+        chat,
+        "set_model_settings",
+        lambda *_args: pytest.fail("completed migration must not overwrite model settings"),
+    )
+    monkeypatch.setattr(
+        chat,
+        "set_site_setting",
+        lambda *_args: pytest.fail("completed migration must not rewrite the marker"),
+    )
+
+    chat.init_model_settings()
+
+    assert chat._model_enabled[chat.PRIMARY_MODEL_KEY] is True
+    assert chat._model_enabled[chat.FALLBACK_MODEL_KEY] is False
 
 
 def test_competition_router_distinguishes_similar_electric_classes():

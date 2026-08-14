@@ -43,6 +43,27 @@ test("admin navigation and model controls work without health-check copy", async
   await expect(page).toHaveScreenshot("admin-desktop-conversation-light.png", { animations: "disabled" });
 });
 
+test("admin overview exposes actionable period metrics", async ({ page }) => {
+  await installAdminMocks(page);
+  await page.goto("/static/admin.html");
+
+  const summary = page.locator("#usage-summary");
+  await expect(summary).toContainText("답변 안정성");
+  await expect(summary).toContainText("98.4%");
+  await expect(summary).toContainText("검색 저하");
+  await expect(summary).toContainText("1.3초");
+  await expect(summary).toContainText("$0.42");
+  await expect(summary).toContainText("Gemini Flash (Latest)");
+
+  const periodRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/admin/overview" && url.searchParams.get("period") === "7d";
+  });
+  await page.getByRole("button", { name: "7일" }).click();
+  await periodRequest;
+  await expect(page.getByRole("button", { name: "7일" })).toHaveAttribute("aria-pressed", "true");
+});
+
 test("clicking a user name opens only that user's conversations", async ({ page }) => {
   await installAdminMocks(page);
   await page.goto("/static/admin.html");

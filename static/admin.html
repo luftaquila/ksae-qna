@@ -45,7 +45,22 @@
     <main id="admin-content" class="admin-content">
       <!-- Users Tab -->
       <div id="tab-users" class="tab-panel active">
-        <div id="usage-summary" class="usage-summary"></div>
+        <section class="overview-shell" aria-labelledby="overview-title">
+          <div class="overview-header">
+            <div>
+              <h2 id="overview-title">운영 현황</h2>
+              <p>사용자 활동, 답변 안정성, 이용권과 API 비용을 함께 봅니다.</p>
+            </div>
+            <div class="overview-period" role="group" aria-label="통계 조회 기간">
+              <button type="button" data-period="7d" aria-pressed="false">7일</button>
+              <button type="button" data-period="30d" aria-pressed="true">30일</button>
+              <button type="button" data-period="all" aria-pressed="false">전체</button>
+            </div>
+          </div>
+          <div id="usage-summary" class="usage-summary" aria-live="polite" aria-busy="true">
+            <p class="overview-loading">운영 통계를 불러오는 중입니다.</p>
+          </div>
+        </section>
         <div class="admin-search">
           <label class="visually-hidden" for="user-search">사용자 검색</label>
           <input type="search" id="user-search" placeholder="이름 또는 이메일 검색" autocomplete="off">

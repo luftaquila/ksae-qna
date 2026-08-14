@@ -24,7 +24,12 @@ from google.genai import types
 from qdrant_client import QdrantClient, models
 from sentence_transformers import SentenceTransformer
 
-from src.auth import get_model_settings_map, set_model_settings
+from src.auth import (
+    get_model_settings_map,
+    get_site_setting,
+    set_model_settings,
+    set_site_setting,
+)
 from src.rules_registry import (
     RULES_COLLECTION_YEAR,
     normalize_competition_key,
@@ -49,6 +54,7 @@ FALLBACK_MODEL_KEY = "gemini-3-pro"
 UTILITY_MODEL_KEY = "gemini-3-flash"
 ROUTING_MODEL_KEYS = (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY)
 CHAT_CREDIT_COST = 1
+MODEL_ROUTING_VERSION = "flash-primary-pro-fallback-v1"
 
 EMBEDDING_MODEL = "BAAI/bge-m3"
 # 검색 소스 레지스트리 — 컬렉션을 추가할 때 고쳐야 하는 유일한 곳.
@@ -298,8 +304,14 @@ def init_resources():
 
 
 def init_model_settings() -> None:
-    """Load admin model settings from DB into in-memory cache."""
+    """Load model settings and apply the current routing migration once."""
     settings = get_model_settings_map()
+    if get_site_setting("model_routing_version") != MODEL_ROUTING_VERSION:
+        for key in ROUTING_MODEL_KEYS:
+            set_model_settings(key, True, None)
+            settings.setdefault(key, {})["enabled"] = True
+        set_site_setting("model_routing_version", MODEL_ROUTING_VERSION)
+    _model_enabled.clear()
     for key, val in settings.items():
         _model_enabled[key] = val["enabled"]
 
