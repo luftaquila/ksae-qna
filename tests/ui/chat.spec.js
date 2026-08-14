@@ -90,6 +90,40 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   await expect(page.locator("#send span")).toHaveText("전송");
 });
 
+test("desktop welcome notice fits its longest line and stays centered", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await installChatMocks(page);
+  await page.goto("/static/index.html");
+
+  const layout = await page.locator(".welcome").evaluate((welcome) => {
+    const items = welcome.querySelector(".welcome-items");
+    const welcomeBox = welcome.getBoundingClientRect();
+    const itemsBox = items.getBoundingClientRect();
+    const warning = welcome.querySelector(".welcome-warn");
+    const warningBox = warning.getBoundingClientRect();
+    const warningRange = document.createRange();
+    warningRange.selectNodeContents(warning);
+    const warningTextBox = warningRange.getBoundingClientRect();
+    const textHosts = items.querySelectorAll(".welcome-item > span:last-child");
+    return {
+      leftSpace: itemsBox.left - welcomeBox.left,
+      rightSpace: welcomeBox.right - itemsBox.right,
+      fillsContainer: Math.abs(itemsBox.width - welcomeBox.width) < 1,
+      warningFitsLongestLine: Math.abs(warningBox.width - warningTextBox.width) < 1,
+      warningNoWrap: getComputedStyle(warning).whiteSpace === "nowrap",
+      noWrappedRows: Array.from(textHosts).every((element) =>
+        getComputedStyle(element).whiteSpace === "nowrap"
+      ),
+    };
+  });
+
+  expect(Math.abs(layout.leftSpace - layout.rightSpace)).toBeLessThanOrEqual(1);
+  expect(layout.fillsContainer).toBe(true);
+  expect(layout.warningFitsLongestLine).toBe(true);
+  expect(layout.warningNoWrap).toBe(true);
+  expect(layout.noWrappedRows).toBe(true);
+});
+
 test("signed-in users can open my page from their profile", async ({ page }) => {
   await installChatMocks(page);
   await page.goto("/static/index.html");

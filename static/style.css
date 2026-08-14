@@ -880,7 +880,8 @@ header {
 
 .welcome {
   display: flex;
-  width: min(100%, 620px);
+  width: max-content;
+  max-width: 100%;
   min-height: 100%;
   flex: 0 0 auto;
   align-self: center;
@@ -916,7 +917,7 @@ header {
 
 .welcome-items {
   width: 100%;
-  margin-top: 28px;
+  margin: 28px auto 0;
   border-top: 1px solid var(--border-color);
   border-bottom: 1px solid var(--border-color);
   text-align: left;
@@ -937,7 +938,8 @@ header {
 
 .welcome-item > span:last-child {
   min-width: 0;
-  flex: 1;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .welcome-icon {
@@ -968,12 +970,12 @@ header {
 }
 
 .welcome-warn {
-  max-width: 560px;
   margin: 22px auto 0;
   color: var(--text-tertiary);
   font-size: 13.5px;
   line-height: 1.7;
   word-break: keep-all;
+  white-space: nowrap;
 }
 
 .welcome-contact {
@@ -1087,9 +1089,11 @@ header {
   .collection-selector { width: auto; }
   .input-row button { min-width: 48px; width: 48px; padding: 0; }
   .input-row button span { display: none; }
-  .welcome { padding: 36px 4px 72px; }
+  .welcome { width: 100%; padding: 36px 4px 72px; }
   .welcome-title { font-size: 22px; }
   .welcome-item { padding: 12px 2px; }
+  .welcome-item > span:last-child { flex: 1; white-space: normal; }
+  .welcome-warn { max-width: 560px; white-space: normal; }
 }
 
 @media (max-width: 360px) {
