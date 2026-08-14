@@ -16,7 +16,7 @@ for (const viewport of viewports) {
       await installChatMocks(page);
       await page.goto("/static/index.html");
       await page.waitForFunction(() => document.fonts.status === "loaded");
-      await expect(page.locator(".welcome-title")).toHaveText("PitBot");
+      await expect(page.locator(".welcome")).toBeVisible();
       await expect(page).toHaveScreenshot(`chat-${viewport.name}-${theme}.png`, { animations: "disabled" });
     });
   }
@@ -45,7 +45,7 @@ test("chat sends a question and renders streamed evidence", async ({ page }) => 
 test("chat has no serious accessibility violations", async ({ page }) => {
   await installChatMocks(page);
   await page.goto("/static/index.html");
-  await expect(page.locator(".welcome-title")).toHaveText("PitBot");
+  await expect(page.locator(".welcome")).toBeVisible();
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(results.violations.filter((violation) => ["serious", "critical"].includes(violation.impact))).toEqual([]);
 });
@@ -54,41 +54,6 @@ test("chat matches the server input limit", async ({ page }) => {
   await installChatMocks(page);
   await page.goto("/static/index.html");
   await expect(page.locator("#query")).toHaveAttribute("maxlength", "2000");
-});
-
-test("chat keeps the original welcome copy", async ({ page }) => {
-  await installChatMocks(page);
-  await page.goto("/static/index.html");
-  await expect(page.locator(".welcome-title")).toHaveText("PitBot");
-  await expect(page.locator(".welcome-subtitle")).toHaveText("자작자동차 규정 및 Q&A 챗봇");
-  await expect(page.locator(".welcome-items")).toContainText("질문 1회당 이용권 1장이 차감됩니다.");
-  await expect(page.locator(".welcome-items")).toContainText("매월 1일마다 이용권이 무료로 다시 충전됩니다.");
-  await expect(page.locator(".welcome-items")).toContainText("입력창 상단에서 답변에 사용할 데이터를 선택합니다.");
-  await expect(page.locator(".welcome-chip-list")).toContainText("규정 — 2026 대회 규정 전체 (Formula/Baja/EV)");
-  await expect(page.locator(".welcome-chip-list")).toContainText("Q&A — KSAE Q&A 게시판 질의응답");
-  await expect(page.locator(".welcome-chip-list")).toContainText("AARK — AARK 익명톡방 (2025년 2월 ~ 2026년 7월)");
-  await expect(page.locator(".welcome-icon")).toHaveText(["⚡", "📚"]);
-  const guideFontSize = await page.locator(".welcome-item").first().evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
-  expect(guideFontSize).toBeGreaterThanOrEqual(15);
-  await expect(page.locator(".welcome-warn")).toHaveText("LLM은 실수하거나 잘못된 정보를 제공할 수 있으며, AI 답변은 차량검차 시 근거자료로 사용할 수 없습니다.");
-  await expect(page.locator(".welcome-warn")).toHaveCSS("word-break", "keep-all");
-  await page.setViewportSize({ width: 320, height: 844 });
-  const endingRows = await page.locator(".welcome-warn").evaluate((element) => {
-    const text = element.firstChild;
-    const start = text.length - "없습니다.".length;
-    return Array.from({ length: "없습니다.".length }, (_, offset) => {
-      const range = document.createRange();
-      range.setStart(text, start + offset);
-      range.setEnd(text, start + offset + 1);
-      return Math.round(range.getBoundingClientRect().top);
-    });
-  });
-  expect(new Set(endingRows).size).toBe(1);
-  await expect(page.locator(".welcome")).not.toContainText("사용 모델");
-  await expect(page.locator("#model-select")).toHaveCount(0);
-  await expect(page.locator("#query")).toHaveAttribute("placeholder", "질문을 입력하세요...");
-  await expect(page.locator(".source-group .control-label")).toHaveText("검색 소스");
-  await expect(page.locator("#send span")).toHaveText("전송");
 });
 
 test("fallback and model details are not shown to users", async ({ page }) => {

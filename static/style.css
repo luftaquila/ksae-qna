@@ -836,7 +836,6 @@ header {
 
 .collection-chip:hover {
   color: var(--text-secondary);
-  background: var(--bg-container);
 }
 
 .collection-chip:has(input:checked):hover {
