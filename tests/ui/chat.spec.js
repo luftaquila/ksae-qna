@@ -63,6 +63,9 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   await expect(page.locator(".welcome-subtitle")).toHaveText("자작자동차 규정 및 Q&A 챗봇");
   await expect(page.locator(".welcome-items")).toContainText("질문 1회당 이용권 1장이 차감됩니다");
   await expect(page.locator(".welcome-items")).toContainText("입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.");
+  await expect(page.locator(".welcome-chip-list")).toContainText("규정 — 2026 대회 규정");
+  await expect(page.locator(".welcome-chip-list")).toContainText("Q&A — KSAE Q&A 게시판");
+  await expect(page.locator(".welcome-chip-list")).toContainText("AARK — AARK 익명톡방 (2025년 2월 ~ 2026년 7월)");
   await expect(page.locator(".welcome-icon")).toHaveText(["⚡", "📚"]);
   const guideFontSize = await page.locator(".welcome-item").first().evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
   expect(guideFontSize).toBeGreaterThanOrEqual(15);
@@ -85,6 +88,12 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   await expect(page.locator("#query")).toHaveAttribute("placeholder", "질문을 입력하세요...");
   await expect(page.locator(".source-group .control-label")).toHaveText("검색 소스");
   await expect(page.locator("#send span")).toHaveText("전송");
+});
+
+test("signed-in users can open my page from their profile", async ({ page }) => {
+  await installChatMocks(page);
+  await page.goto("/static/index.html");
+  await expect(page.getByRole("link", { name: "김피트" })).toHaveAttribute("href", "/account");
 });
 
 for (const viewport of [

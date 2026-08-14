@@ -62,16 +62,19 @@ function renderAuthUI() {
     const imgTag = currentUser.picture
       ? `<img src="${escapeAttr(currentUser.picture)}" class="profile-img" alt="" referrerpolicy="no-referrer">`
       : "";
-    const img = currentUser.is_admin
-      ? `<a href="/admin" class="profile-admin-link" title="관리자 페이지">${imgTag}</a>`
-      : imgTag;
+    const adminLink = currentUser.is_admin
+      ? `<a href="/admin" class="profile-admin-link">관리자</a>`
+      : "";
     const creditText = unlimitedCredits ? "∞ 이용권" : `${currentUser.credits} 이용권`;
     const lowClass = !unlimitedCredits && currentUser.credits <= lowCreditThreshold ? " low" : "";
 
     authArea.innerHTML = `
       <div class="profile-info">
-        ${img}
-        <span class="profile-name">${escapeHtml(currentUser.name)}</span>
+        <a href="/account" class="profile-account-link" title="마이페이지">
+          ${imgTag}
+          <span class="profile-name">${escapeHtml(currentUser.name)}</span>
+        </a>
+        ${adminLink}
       </div>
       <div class="token-wrapper">
         <span class="credit-badge${lowClass}" id="credit-badge">${creditText}</span>

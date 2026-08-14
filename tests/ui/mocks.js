@@ -1,7 +1,7 @@
 export const collections = [
-  { key: "rules", label: "규정", description: "2026 대회 규정 전체" },
-  { key: "qna", label: "Q&A", description: "KSAE Q&A 게시판 전체" },
-  { key: "kb", label: "AARK", description: "참가팀 익명 단톡방 지식베이스" },
+  { key: "rules", label: "규정", description: "2026 대회 규정" },
+  { key: "qna", label: "Q&A", description: "KSAE Q&A 게시판" },
+  { key: "kb", label: "AARK", description: "AARK 익명톡방 (2025년 2월 ~ 2026년 7월)" },
 ];
 
 export const users = [
@@ -51,7 +51,7 @@ export const adminModels = [
   },
   {
     id: "gemini-3-flash",
-    label: "Gemini 3 Flash",
+    label: "Gemini Flash (Latest)",
     role: "fallback",
     provider: "gemini",
     provider_available: true,
@@ -71,6 +71,7 @@ export async function installChatMocks(page) {
     if (path === "/api/collections") return route.fulfill({ json: { collections } });
     if (path === "/api/sessions") return route.fulfill({ json: { sessions: [{ id: 10, title: "Formula 지상고 기준" }] } });
     if (path === "/api/transactions") return route.fulfill({ json: { transactions: [] } });
+    if (path === "/api/account" && request.method() === "DELETE") return route.fulfill({ json: { ok: true } });
     if (path === "/api/chat") {
       const sources = [{ source: "2026 Formula 규정", score: 0.91, url: "https://example.com/rule", content: "차량의 지상고 측정 조건에 관한 근거입니다." }];
       const body = [
@@ -109,6 +110,7 @@ export async function installAdminMocks(page) {
       } } });
     }
     if (path === "/api/admin/sessions") return route.fulfill({ json: { sessions: [{ id: 10, title: "Formula 지상고 기준", user_name: "김피트", updated_at: "2026-08-01T03:00:00", deleted_at: null }] } });
+    if (path === "/api/admin/users/1/sessions") return route.fulfill({ json: { sessions: [{ id: 10, title: "Formula 지상고 기준", user_name: "김피트", updated_at: "2026-08-01T03:00:00", deleted_at: null }] } });
     if (/\/api\/admin\/users\/\d+\/sessions/.test(path)) return route.fulfill({ json: { sessions: [] } });
     if (/\/api\/admin\/sessions\/\d+\/messages/.test(path)) return route.fulfill({ json: { messages: [{ id: 1, role: "user", content: "지상고 기준은?", created_at: "2026-08-01T03:00:00" }, { id: 2, role: "assistant", content: "측정 조건을 먼저 확인해야 합니다.", created_at: "2026-08-01T03:01:00", model: "gemini-3-pro", input_tokens: 100, output_tokens: 30, thinking_tokens: 12, sources: "[]" }] } });
     if (/\/api\/admin\/users\/\d+\/transactions/.test(path)) return route.fulfill({ json: { transactions: [] } });

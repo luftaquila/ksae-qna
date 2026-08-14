@@ -19,6 +19,7 @@ DB_PATH = os.path.join("data", "users.db")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY = 7 * 24 * 3600  # 7 days
 COOKIE_NAME = "token"
+PRIVACY_CONSENT_VERSION = "2026-08-14"
 
 # ---------------------------------------------------------------------------
 # Module-level resources (initialised once)
@@ -125,6 +126,17 @@ def init_db() -> None:
         """
     )
     conn.commit()
+
+    # New accounts must record the privacy notice accepted after Google OAuth.
+    # Existing accounts predate this signup flow and intentionally remain NULL.
+    for column, definition in (
+        ("privacy_consent_at", "TEXT"),
+        ("privacy_consent_version", "TEXT"),
+    ):
+        try:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+        except sqlite3.OperationalError:
+            pass
 
     # Migrate: add token usage columns to messages
     for col in ("input_tokens", "output_tokens", "thinking_tokens"):
@@ -504,7 +516,11 @@ def set_model_order(order: list[str]) -> None:
 
 
 def get_or_create_user(
-    google_id: str, email: str, name: str, picture: str | None
+    google_id: str,
+    email: str,
+    name: str,
+    picture: str | None,
+    privacy_consent_version: str | None = None,
 ) -> dict:
     conn = _get_conn()
     row = conn.execute(
@@ -523,10 +539,16 @@ def get_or_create_user(
             ).fetchone()
         )
     else:
+        if not privacy_consent_version:
+            conn.close()
+            raise ValueError("privacy consent is required for a new account")
         default_credits = get_default_credits()
         conn.execute(
-            "INSERT INTO users (google_id, email, name, picture, credits) VALUES (?, ?, ?, ?, ?)",
-            (google_id, email, name, picture, default_credits),
+            """INSERT INTO users (
+                   google_id, email, name, picture, credits,
+                   privacy_consent_at, privacy_consent_version
+               ) VALUES (?, ?, ?, ?, ?, datetime('now'), ?)""",
+            (google_id, email, name, picture, default_credits, privacy_consent_version),
         )
         conn.commit()
         user = dict(
@@ -539,11 +561,66 @@ def get_or_create_user(
     return user
 
 
+def get_user_by_google_id(google_id: str) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM users WHERE google_id = ?", (google_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def get_user_by_id(user_id: int) -> dict | None:
     conn = _get_conn()
     row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def delete_user_account(user_id: int) -> str:
+    """Permanently delete an account and all service data owned by it.
+
+    A recently started model response may still try to persist messages, so
+    deletion is rejected while it is active. Old orphaned pending rows do not
+    block withdrawal forever.
+    """
+    conn = _get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if not conn.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone():
+            conn.rollback()
+            return "not_found"
+        pending = conn.execute(
+            """SELECT 1
+               FROM chat_turns ct
+               JOIN sessions s ON s.id = ct.session_id
+               WHERE s.user_id = ?
+                 AND ct.status = 'pending'
+                 AND ct.created_at >= datetime('now', '-15 minutes')
+               LIMIT 1""",
+            (user_id,),
+        ).fetchone()
+        if pending:
+            conn.rollback()
+            return "pending"
+
+        session_ids = "SELECT id FROM sessions WHERE user_id = ?"
+        conn.execute(
+            f"DELETE FROM chat_turns WHERE session_id IN ({session_ids})",
+            (user_id,),
+        )
+        conn.execute(
+            f"DELETE FROM messages WHERE session_id IN ({session_ids})",
+            (user_id,),
+        )
+        conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM token_transactions WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        return "deleted"
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def deduct_credit(user_id: int, amount: int = 1, memo: str = "질문") -> bool:

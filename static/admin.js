@@ -62,21 +62,23 @@ async function checkAdmin() {
 // Tabs
 // ---------------------------------------------------------------------------
 let convLoaded = false;
-document.querySelectorAll(".admin-tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".admin-tab").forEach((t) => {
-      t.classList.remove("active");
-      t.setAttribute("aria-selected", "false");
-    });
-    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
-    tab.classList.add("active");
-    tab.setAttribute("aria-selected", "true");
-    document.getElementById(`tab-${tab.dataset.tab}`).classList.add("active");
-    if (tab.dataset.tab === "conversations" && !convLoaded) {
-      convLoaded = true;
-      loadSessions("");
-    }
+function activateAdminTab(tabName) {
+  document.querySelectorAll(".admin-tab").forEach((tab) => {
+    const active = tab.dataset.tab === tabName;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
   });
+  document.querySelectorAll(".tab-panel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `tab-${tabName}`);
+  });
+  if (tabName === "conversations" && !convLoaded) {
+    convLoaded = true;
+    loadSessions("");
+  }
+}
+
+document.querySelectorAll(".admin-tab").forEach((tab) => {
+  tab.addEventListener("click", () => activateAdminTab(tab.dataset.tab));
 });
 
 // ---------------------------------------------------------------------------
@@ -166,7 +168,7 @@ function renderUsers(filter = "") {
       const totalThink = u.total_thinking_tokens || 0;
       const cost = estimateModelCost(u.model_usage || []);
       return `<tr data-user-id="${u.id}">
-        <td>${pic}${escapeHtml(u.name)}</td>
+        <td><button class="user-conversation-link" type="button" onclick="openUserConversations(${u.id})" aria-label="${escapeAttr(u.name)} 사용자의 대화 기록 보기">${pic}<span>${escapeHtml(u.name)}</span></button></td>
         <td>${escapeHtml(u.email)}</td>
         <td>
           <div class="credit-cell" id="credit-cell-${u.id}">
@@ -489,6 +491,13 @@ function populateUserFilter() {
   }
 }
 
+window.openUserConversations = function (userId) {
+  convLoaded = true;
+  activateAdminTab("conversations");
+  convUserSelect.value = String(userId);
+  loadSessions(String(userId));
+};
+
 convUserSelect.addEventListener("change", () => {
   loadSessions(convUserSelect.value);
 });
@@ -508,6 +517,11 @@ async function loadSessions(userId) {
 function renderSessionList(sessions) {
   currentConvSessionId = null;
   convMessages.innerHTML = `<div class="conv-empty">대화를 선택하세요</div>`;
+
+  if (!sessions.length) {
+    convSessionList.innerHTML = `<div class="conv-list-empty">대화 기록이 없습니다</div>`;
+    return;
+  }
 
   convSessionList.innerHTML = sessions
     .map((s) => {

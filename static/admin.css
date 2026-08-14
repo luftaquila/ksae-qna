@@ -271,6 +271,35 @@
   vertical-align: middle;
 }
 
+.user-conversation-link {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  padding: 2px 4px 2px 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-primary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+}
+
+.user-conversation-link:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.user-conversation-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.user-conversation-link .user-picture { flex: 0 0 auto; }
+.user-conversation-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .last-active-cell,
 .api-token-cell {
   white-space: nowrap;
@@ -479,6 +508,13 @@
   justify-content: center;
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+.conv-list-empty {
+  padding: 24px 16px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
 }
 
 .admin-msg {

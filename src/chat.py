@@ -60,7 +60,7 @@ def _build_collection_registry() -> dict[str, dict]:
         "rules": {
             "collection": "ksae-formula-rules",
             "label": "규정",
-            "description": "2026 대회 규정 전체 — 질문에 맞는 종목과 문서를 자동 검색",
+            "description": "2026 대회 규정",
             "authority": "공식",
             "source_type": "rules",
             "competition": "formula",
@@ -71,7 +71,7 @@ def _build_collection_registry() -> dict[str, dict]:
         "qna": {
             "collection": "ksae-qna",
             "label": "Q&A",
-            "description": "KSAE Q&A 게시판 전체 — 질문에 맞는 분류를 자동 검색",
+            "description": "KSAE Q&A 게시판",
             "authority": "공식 해석",
             "source_type": "qna",
             "year": "",
@@ -79,11 +79,11 @@ def _build_collection_registry() -> dict[str, dict]:
         "kb": {
             "collection": "ksae-aark-kb",
             "label": "AARK",
-        "description": "참가팀 익명 단톡방 지식베이스 (2025-02 ~ 2026-08)",
-        "authority": "경험담",
-        "source_type": "aark",
-        "year": "",
-    },
+            "description": "AARK 익명톡방 (2025년 2월 ~ 2026년 7월)",
+            "authority": "경험담",
+            "source_type": "aark",
+            "year": "",
+        },
     }
 
     for info in rules_collection_registry(year=RULES_COLLECTION_YEAR).values():
@@ -209,8 +209,10 @@ MAX_CHUNKS_PER_POST = 2
 MODEL_CONFIG = {
     "gemini-3-flash": {
         "provider": "gemini",
-        "model_id": "gemini-3.6-flash",
-        "label": "Gemini 3.6 Flash",
+        # Google-maintained alias. It currently resolves to Gemini 3.7 Flash;
+        # the provider's concrete model_version is persisted with every turn.
+        "model_id": "gemini-flash-latest",
+        "label": "Gemini Flash (Latest)",
         "credits": 1,
         "thinking_level": "high",
         "pricing": {"input": 1.50, "output": 7.50, "thinking": 7.50},

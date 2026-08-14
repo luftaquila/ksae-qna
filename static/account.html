@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>PitBot · 마이페이지</title>
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/account.css">
+  <script>
+    (function() {
+      var t = localStorage.getItem("theme");
+      if (t) document.documentElement.setAttribute("data-theme", t);
+      else if (window.matchMedia("(prefers-color-scheme: dark)").matches)
+        document.documentElement.setAttribute("data-theme", "dark");
+    })();
+  </script>
+</head>
+<body class="account-page">
+  <main class="account-shell">
+    <a href="/" class="account-brand">
+      <img src="/static/logo.svg" alt="" class="header-logo">
+      <span>PitBot</span>
+    </a>
+
+    <section class="account-card" aria-labelledby="account-title">
+      <p class="account-eyebrow">마이페이지</p>
+      <h1 id="account-title">내 계정</h1>
+      <div id="account-user" class="account-user" aria-live="polite">
+        <div class="account-user-copy"><strong>계정 정보를 불러오는 중입니다</strong></div>
+      </div>
+      <p class="account-retention">개인정보는 회원 탈퇴 시까지 보관됩니다.</p>
+      <a href="/" class="back-to-chat">채팅으로 돌아가기</a>
+    </section>
+
+    <section class="account-card danger-card" aria-labelledby="delete-title">
+      <p class="account-eyebrow danger">계정 관리</p>
+      <h2 id="delete-title">회원 탈퇴</h2>
+      <p>탈퇴하면 계정, 대화 기록, 이용권 및 이용 내역이 즉시 삭제되며 복구할 수 없습니다.</p>
+      <label for="delete-confirmation">계속하려면 <b>회원탈퇴</b>를 입력하세요.</label>
+      <input id="delete-confirmation" type="text" autocomplete="off" placeholder="회원탈퇴">
+      <p id="account-error" class="account-error" role="alert"></p>
+      <button id="delete-account" class="danger-action" type="button" disabled>계정 영구 삭제</button>
+    </section>
+  </main>
+  <script src="/static/account.js"></script>
+</body>
+</html>

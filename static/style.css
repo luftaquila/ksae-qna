@@ -387,6 +387,15 @@ header {
   gap: 8px;
 }
 
+.profile-account-link {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
 .profile-img {
   width: 30px;
   height: 30px;
@@ -395,12 +404,13 @@ header {
 }
 
 .profile-admin-link {
-  display: flex;
-}
-
-.profile-admin-link .profile-img {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 1px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  color: var(--color-primary);
+  background: var(--badge-bg);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 .profile-name {
@@ -1064,6 +1074,10 @@ header {
   .welcome { padding: 36px 4px 72px; }
   .welcome-title { font-size: 22px; }
   .welcome-item { padding: 12px 2px; }
+}
+
+@media (max-width: 360px) {
+  .header-brand h1 { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

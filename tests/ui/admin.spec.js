@@ -42,6 +42,22 @@ test("admin navigation and model controls work without health-check copy", async
   await expect(page).toHaveScreenshot("admin-desktop-conversation-light.png", { animations: "disabled" });
 });
 
+test("clicking a user name opens only that user's conversations", async ({ page }) => {
+  await installAdminMocks(page);
+  await page.goto("/static/admin.html");
+
+  const filteredRequest = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === "/api/admin/users/1/sessions"
+  );
+  await page.getByRole("button", { name: "김피트 사용자의 대화 기록 보기" }).click();
+  await filteredRequest;
+
+  await expect(page.getByRole("tab", { name: "대화 기록" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#conv-user-select")).toHaveValue("1");
+  await expect(page.locator(".conv-session-item")).toHaveCount(1);
+  await expect(page.locator(".conv-session-item")).toContainText("Formula 지상고 기준");
+});
+
 test("admin has no serious accessibility violations", async ({ page }) => {
   await installAdminMocks(page);
   await page.goto("/static/admin.html");

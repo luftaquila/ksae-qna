@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>PitBot · 회원가입</title>
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/account.css">
+  <script>
+    (function() {
+      var t = localStorage.getItem("theme");
+      if (t) document.documentElement.setAttribute("data-theme", t);
+      else if (window.matchMedia("(prefers-color-scheme: dark)").matches)
+        document.documentElement.setAttribute("data-theme", "dark");
+    })();
+  </script>
+</head>
+<body class="account-page">
+  <main class="account-shell">
+    <a href="/" class="account-brand">
+      <img src="/static/logo.svg" alt="" class="header-logo">
+      <span>PitBot</span>
+    </a>
+
+    <section class="account-card" aria-labelledby="signup-title">
+      <p class="account-eyebrow">회원가입</p>
+      <h1 id="signup-title">개인정보 수집·이용 동의</h1>
+      <p class="account-description">Google 계정 연결이 완료되었습니다. 아래 필수 동의 후 가입을 마칠 수 있습니다.</p>
+
+      <div id="signup-user" class="account-user" aria-live="polite">
+        <div class="account-user-copy">
+          <strong>계정 정보를 불러오는 중입니다</strong>
+        </div>
+      </div>
+
+      <div class="privacy-notice">
+        <dl>
+          <div><dt>수집 항목</dt><dd>이름, 이메일, 프로필 사진, 대화 및 서비스 이용 기록</dd></div>
+          <div><dt>이용 목적</dt><dd>회원 관리와 서비스·이용권 제공</dd></div>
+          <div><dt>보유 기간</dt><dd>회원 탈퇴 시까지</dd></div>
+        </dl>
+        <p>동의를 거부할 수 있으나, 필수 정보이므로 거부 시 회원가입과 서비스 이용이 불가합니다.</p>
+      </div>
+
+      <label class="consent-check">
+        <input id="privacy-consent" type="checkbox">
+        <span><b>[필수]</b> 개인정보 수집·이용에 동의합니다.</span>
+      </label>
+
+      <p id="signup-error" class="account-error" role="alert"></p>
+      <div class="account-actions">
+        <button id="signup-cancel" class="secondary-action" type="button">취소</button>
+        <button id="signup-submit" class="primary-action" type="button" disabled>가입 완료</button>
+      </div>
+    </section>
+  </main>
+  <script src="/static/signup.js"></script>
+</body>
+</html>

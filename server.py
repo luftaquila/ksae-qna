@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.auth import (
+    PRIVACY_CONSENT_VERSION,
     add_credits,
     add_message,
     admin_bulk_set_credits,
@@ -37,6 +38,7 @@ from src.auth import (
     create_jwt,
     create_session,
     deduct_credit,
+    delete_user_account,
     delete_session,
     get_all_site_settings,
     get_current_user,
@@ -47,6 +49,7 @@ from src.auth import (
     get_all_users_token_usage_by_model,
     get_user_token_usage_by_model,
     get_or_create_user,
+    get_user_by_google_id,
     get_session,
     get_transactions,
     init_admin_emails,
@@ -198,12 +201,27 @@ class BulkCreditRequest(BaseModel):
     memo: str = Field(default="관리자 일괄 조정", max_length=200)
 
 
+class PrivacyConsentRequest(BaseModel):
+    privacy_consent: bool
+
+
+class AccountDeleteRequest(BaseModel):
+    confirmation: str = Field(..., max_length=20)
+
+
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
 @app.get("/")
 async def index():
     return FileResponse("static/index.html")
+
+
+@app.get("/account")
+async def account_page(request: Request):
+    if not get_current_user(request):
+        return RedirectResponse(url="/", status_code=302)
+    return FileResponse("static/account.html")
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +240,17 @@ async def auth_callback(request: Request):
     token = await oauth.google.authorize_access_token(request)
     userinfo = token.get("userinfo")
 
+    existing_user = get_user_by_google_id(userinfo["sub"])
+    if not existing_user:
+        request.session["pending_signup"] = {
+            "google_id": userinfo["sub"],
+            "email": userinfo["email"],
+            "name": userinfo.get("name", userinfo["email"]),
+            "picture": userinfo.get("picture"),
+            "expires_at": int(time.time()) + 600,
+        }
+        return RedirectResponse(url="/signup/consent", status_code=302)
+
     user = get_or_create_user(
         google_id=userinfo["sub"],
         email=userinfo["email"],
@@ -233,6 +262,64 @@ async def auth_callback(request: Request):
     response = RedirectResponse(url="/", status_code=302)
     set_auth_cookie(response, jwt_token)
     return response
+
+
+def _pending_signup(request: Request) -> dict | None:
+    pending = request.session.get("pending_signup")
+    if not isinstance(pending, dict) or int(pending.get("expires_at", 0)) < int(time.time()):
+        request.session.pop("pending_signup", None)
+        return None
+    required = ("google_id", "email", "name")
+    return pending if all(pending.get(key) for key in required) else None
+
+
+@app.get("/signup/consent")
+async def signup_consent_page(request: Request):
+    if get_current_user(request):
+        return RedirectResponse(url="/", status_code=302)
+    if not _pending_signup(request):
+        return RedirectResponse(url="/", status_code=302)
+    return FileResponse("static/signup.html")
+
+
+@app.get("/api/auth/signup-pending")
+async def signup_pending(request: Request):
+    pending = _pending_signup(request)
+    if not pending:
+        return JSONResponse({"error": "가입 정보가 만료되었습니다. 다시 로그인해주세요."}, status_code=404)
+    return {
+        "name": pending["name"],
+        "email": pending["email"],
+        "picture": pending.get("picture"),
+        "privacy_consent_version": PRIVACY_CONSENT_VERSION,
+    }
+
+
+@app.post("/api/auth/signup-consent")
+async def signup_consent(body: PrivacyConsentRequest, request: Request):
+    if not body.privacy_consent:
+        return JSONResponse({"error": "필수 개인정보 수집·이용 동의가 필요합니다."}, status_code=400)
+    pending = _pending_signup(request)
+    if not pending:
+        return JSONResponse({"error": "가입 정보가 만료되었습니다. 다시 로그인해주세요."}, status_code=404)
+
+    user = get_or_create_user(
+        google_id=pending["google_id"],
+        email=pending["email"],
+        name=pending["name"],
+        picture=pending.get("picture"),
+        privacy_consent_version=PRIVACY_CONSENT_VERSION,
+    )
+    request.session.pop("pending_signup", None)
+    response = JSONResponse({"ok": True})
+    set_auth_cookie(response, create_jwt(user["id"]))
+    return response
+
+
+@app.post("/api/auth/signup-cancel")
+async def signup_cancel(request: Request):
+    request.session.pop("pending_signup", None)
+    return {"ok": True}
 
 
 @app.post("/api/auth/logout")
@@ -267,6 +354,28 @@ async def me(request: Request):
         "low_credit_threshold": low_threshold,
         "unlimited_credits": is_unlimited_credits(),
     }
+
+
+@app.delete("/api/account")
+async def account_delete(body: AccountDeleteRequest, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    if body.confirmation != "회원탈퇴":
+        return JSONResponse({"error": "확인 문구를 정확히 입력해주세요."}, status_code=400)
+
+    result = delete_user_account(user["id"])
+    if result == "pending":
+        return JSONResponse(
+            {"error": "답변 생성이 끝난 뒤 다시 탈퇴해주세요."},
+            status_code=409,
+        )
+    if result != "deleted":
+        return JSONResponse({"error": "계정을 찾을 수 없습니다."}, status_code=404)
+    response = JSONResponse({"ok": True})
+    clear_auth_cookie(response)
+    request.session.clear()
+    return response
 
 
 @app.post("/api/credits/topup")
