@@ -34,6 +34,21 @@
       <a href="/" class="back-to-chat">채팅으로 돌아가기</a>
     </section>
 
+    <section class="account-card" aria-labelledby="usage-title">
+      <p class="account-eyebrow">누적 기록</p>
+      <h2 id="usage-title">내 사용 통계</h2>
+      <p class="account-description">가입 이후 지금까지의 이용 내역입니다.</p>
+      <dl id="usage-stats" class="usage-stats" aria-live="polite" aria-busy="true">
+        <div><dt>대화</dt><dd><strong id="stat-conversations">—</strong><span>개</span></dd></div>
+        <div><dt>질문</dt><dd><strong id="stat-questions">—</strong><span>회</span></dd></div>
+        <div><dt>사용한 이용권</dt><dd><strong id="stat-credits-used">—</strong><span>장</span></dd></div>
+        <div><dt>환불된 이용권</dt><dd><strong id="stat-credits-refunded">—</strong><span>장</span></dd></div>
+        <div><dt>입력 토큰</dt><dd><strong id="stat-input-tokens">—</strong><span>개</span></dd></div>
+        <div><dt>출력 토큰</dt><dd><strong id="stat-output-tokens">—</strong><span>개</span></dd></div>
+        <div><dt>추론 토큰</dt><dd><strong id="stat-thinking-tokens">—</strong><span>개</span></dd></div>
+      </dl>
+    </section>
+
     <section class="account-card danger-card" aria-labelledby="delete-title">
       <p class="account-eyebrow danger">계정 관리</p>
       <h2 id="delete-title">회원 탈퇴</h2>

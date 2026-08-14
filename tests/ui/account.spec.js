@@ -10,6 +10,32 @@ const user = {
   is_admin: false,
 };
 
+const stats = {
+  conversation_count: 12,
+  question_count: 37,
+  credits_used: 35,
+  credits_refunded: 2,
+  input_tokens: 123456,
+  output_tokens: 23456,
+  thinking_tokens: 7890,
+};
+
+for (const { name, viewport } of [
+  { name: "desktop", viewport: { width: 1280, height: 900 } },
+  { name: "mobile", viewport: { width: 320, height: 844 } },
+]) {
+  test(`account visual · ${name}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.route("**/api/me", (route) => route.fulfill({ json: { user } }));
+    await page.route("**/api/account/stats", (route) => route.fulfill({ json: { stats } }));
+    await page.goto("/static/account.html");
+    await expect(page).toHaveScreenshot(`account-${name}-light.png`, {
+      animations: "disabled",
+      fullPage: true,
+    });
+  });
+}
+
 test("signup requires concise privacy consent after Google linking", async ({ page }) => {
   await page.route("**/api/auth/signup-pending", (route) => route.fulfill({
     json: { name: user.name, email: user.email, picture: null, privacy_consent_version: "2026-08-14" },
@@ -32,6 +58,7 @@ test("signup requires concise privacy consent after Google linking", async ({ pa
 
 test("my page requires explicit confirmation before permanent deletion", async ({ page }) => {
   await page.route("**/api/me", (route) => route.fulfill({ json: { user } }));
+  await page.route("**/api/account/stats", (route) => route.fulfill({ json: { stats } }));
   await page.route("**/api/account", (route) => route.fulfill({ json: { ok: true } }));
   page.on("dialog", (dialog) => dialog.accept());
 
@@ -48,6 +75,18 @@ test("my page requires explicit confirmation before permanent deletion", async (
   expect((await deleteRequest).postDataJSON()).toEqual({ confirmation: "회원탈퇴" });
 });
 
+test("my page shows lifetime usage statistics without model details", async ({ page }) => {
+  await page.route("**/api/me", (route) => route.fulfill({ json: { user } }));
+  await page.route("**/api/account/stats", (route) => route.fulfill({ json: { stats } }));
+
+  await page.goto("/static/account.html");
+
+  await expect(page.locator("#usage-stats")).toContainText("12");
+  await expect(page.locator("#usage-stats")).toContainText("37");
+  await expect(page.locator("#usage-stats")).toContainText("123,456");
+  await expect(page.locator("#usage-stats")).not.toContainText(/Gemini|Flash|Pro|폴백|대체 모델/i);
+});
+
 for (const pageName of ["signup", "account"]) {
   test(`${pageName} page is accessible and does not overflow at 320px`, async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 844 });
@@ -57,6 +96,7 @@ for (const pageName of ["signup", "account"]) {
       }));
     } else {
       await page.route("**/api/me", (route) => route.fulfill({ json: { user } }));
+      await page.route("**/api/account/stats", (route) => route.fulfill({ json: { stats } }));
     }
 
     await page.goto(`/static/${pageName}.html`);

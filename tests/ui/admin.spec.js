@@ -30,6 +30,7 @@ test("admin navigation and model controls work without health-check copy", async
   await page.waitForFunction(() => document.fonts.status === "loaded");
   await page.getByRole("tab", { name: "모델" }).click();
   await expect(page.locator(".model-card")).toHaveCount(2);
+  await expect(page.locator("#tab-models")).toContainText("Gemini Flash를 먼저 호출하고 실패할 때 Gemini Pro로 자동 전환합니다.");
   await expect(page.locator("#models-grid")).toContainText("API 키 설정됨");
   await expect(page.locator("#models-grid")).toContainText("기본");
   await expect(page.locator("#models-grid")).toContainText("폴백");

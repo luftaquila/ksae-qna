@@ -61,10 +61,11 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   await page.goto("/static/index.html");
   await expect(page.locator(".welcome-title")).toHaveText("PitBot");
   await expect(page.locator(".welcome-subtitle")).toHaveText("자작자동차 규정 및 Q&A 챗봇");
-  await expect(page.locator(".welcome-items")).toContainText("질문 1회당 이용권 1장이 차감됩니다");
+  await expect(page.locator(".welcome-items")).toContainText("질문 1회당 이용권 1장이 차감됩니다.");
+  await expect(page.locator(".welcome-items")).toContainText("매월 1일마다 이용권이 무료로 다시 충전됩니다.");
   await expect(page.locator(".welcome-items")).toContainText("입력창 상단에서 AI가 검색에 사용할 데이터를 선택할 수 있습니다.");
-  await expect(page.locator(".welcome-chip-list")).toContainText("규정 — 2026 대회 규정");
-  await expect(page.locator(".welcome-chip-list")).toContainText("Q&A — KSAE Q&A 게시판");
+  await expect(page.locator(".welcome-chip-list")).toContainText("규정 — 2026 대회 규정 전체 (Formula/Baja/EV)");
+  await expect(page.locator(".welcome-chip-list")).toContainText("Q&A — KSAE Q&A 게시판 질의응답");
   await expect(page.locator(".welcome-chip-list")).toContainText("AARK — AARK 익명톡방 (2025년 2월 ~ 2026년 7월)");
   await expect(page.locator(".welcome-icon")).toHaveText(["⚡", "📚"]);
   const guideFontSize = await page.locator(".welcome-item").first().evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
@@ -88,6 +89,27 @@ test("chat keeps the original welcome copy", async ({ page }) => {
   await expect(page.locator("#query")).toHaveAttribute("placeholder", "질문을 입력하세요...");
   await expect(page.locator(".source-group .control-label")).toHaveText("검색 소스");
   await expect(page.locator("#send span")).toHaveText("전송");
+});
+
+test("fallback and model details are not shown to users", async ({ page }) => {
+  await installChatMocks(page);
+  await page.goto("/static/index.html");
+  await page.locator("#query").fill("지상고 기준은?");
+  await page.locator("#query").press("Enter");
+
+  await expect(page.locator(".msg.assistant .answer")).toContainText("측정 조건을 먼저 확인해야 합니다");
+  await expect(page.locator(".msg.assistant")).not.toContainText("대체 모델");
+  await expect(page.locator(".msg.assistant")).not.toContainText(/Gemini|Flash|Pro/);
+});
+
+test("credit history hides model names from current and legacy records", async ({ page }) => {
+  await installChatMocks(page);
+  await page.goto("/static/index.html");
+  await page.locator("#credit-badge").click();
+
+  await expect(page.locator(".token-history")).toContainText("질문");
+  await expect(page.locator(".token-history")).toContainText("오류 환불");
+  await expect(page.locator(".token-history")).not.toContainText(/Gemini|Flash|Pro/);
 });
 
 test("desktop welcome notice fits its longest line and stays centered", async ({ page }) => {

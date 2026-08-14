@@ -2,6 +2,17 @@ const userHost = document.getElementById("account-user");
 const confirmation = document.getElementById("delete-confirmation");
 const deleteButton = document.getElementById("delete-account");
 const error = document.getElementById("account-error");
+const statsHost = document.getElementById("usage-stats");
+
+const statTargets = {
+  conversation_count: document.getElementById("stat-conversations"),
+  question_count: document.getElementById("stat-questions"),
+  credits_used: document.getElementById("stat-credits-used"),
+  credits_refunded: document.getElementById("stat-credits-refunded"),
+  input_tokens: document.getElementById("stat-input-tokens"),
+  output_tokens: document.getElementById("stat-output-tokens"),
+  thinking_tokens: document.getElementById("stat-thinking-tokens"),
+};
 
 function escapeHtml(value) {
   const div = document.createElement("div");
@@ -31,6 +42,23 @@ async function loadAccount() {
   }
 }
 
+async function loadUsageStats() {
+  try {
+    const response = await fetch("/api/account/stats");
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    Object.entries(statTargets).forEach(([key, target]) => {
+      target.textContent = Number(data.stats?.[key] || 0).toLocaleString("ko-KR");
+    });
+    statsHost.setAttribute("aria-busy", "false");
+  } catch {
+    statsHost.setAttribute("aria-busy", "false");
+    statsHost.querySelectorAll("strong").forEach((target) => {
+      target.textContent = "확인 불가";
+    });
+  }
+}
+
 confirmation.addEventListener("input", () => {
   deleteButton.disabled = confirmation.value !== "회원탈퇴";
   error.textContent = "";
@@ -57,3 +85,4 @@ deleteButton.addEventListener("click", async () => {
 });
 
 loadAccount();
+loadUsageStats();

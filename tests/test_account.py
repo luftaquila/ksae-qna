@@ -90,3 +90,75 @@ def test_account_deletion_waits_for_pending_turn_then_removes_all_user_data(tmp_
     }
     conn.close()
     assert counts == {table: 0 for table in counts}
+
+
+def test_public_credit_history_hides_current_and_legacy_model_names(tmp_path, monkeypatch):
+    _init_test_db(tmp_path, monkeypatch)
+    user = auth.get_or_create_user(
+        "google-history",
+        "history@example.com",
+        "history",
+        None,
+        privacy_consent_version=auth.PRIVACY_CONSENT_VERSION,
+    )
+    assert auth.deduct_credit(user["id"], 1, "질문 (Gemini Pro (Latest))")
+    auth.refund_credit(user["id"], 1, "오류 환불 (Gemini Pro (Latest))")
+
+    private_history = auth.get_transactions(user["id"])
+    public_history = auth.get_transactions(user["id"], public_view=True)
+
+    assert [row["memo"] for row in private_history] == [
+        "오류 환불 (Gemini Pro (Latest))",
+        "질문 (Gemini Pro (Latest))",
+    ]
+    assert [row["memo"] for row in public_history] == ["오류 환불", "질문"]
+
+
+def test_user_usage_stats_returns_lifetime_totals_without_model_details(tmp_path, monkeypatch):
+    _init_test_db(tmp_path, monkeypatch)
+    user = auth.get_or_create_user(
+        "google-stats",
+        "stats@example.com",
+        "stats",
+        None,
+        privacy_consent_version=auth.PRIVACY_CONSENT_VERSION,
+    )
+    first_session = auth.create_session(user["id"], "first")
+    second_session = auth.create_session(user["id"], "second")
+    auth.add_message(first_session["id"], "user", "첫 번째 질문")
+    auth.add_message(
+        first_session["id"],
+        "assistant",
+        "첫 번째 답변",
+        input_tokens=1200,
+        output_tokens=340,
+        thinking_tokens=90,
+        model="gemini-3-flash-preview",
+    )
+    auth.add_message(second_session["id"], "user", "두 번째 질문")
+    auth.add_message(
+        second_session["id"],
+        "assistant",
+        "두 번째 답변",
+        input_tokens=800,
+        output_tokens=160,
+        thinking_tokens=None,
+        model="gemini-3-pro-preview",
+    )
+    assert auth.deduct_credit(user["id"])
+    assert auth.deduct_credit(user["id"])
+    auth.refund_credit(user["id"])
+    assert auth.delete_session(second_session["id"], user["id"])
+
+    stats = auth.get_user_usage_stats(user["id"])
+
+    assert stats == {
+        "conversation_count": 2,
+        "question_count": 2,
+        "credits_used": 2,
+        "credits_refunded": 1,
+        "input_tokens": 2000,
+        "output_tokens": 500,
+        "thinking_tokens": 90,
+    }
+    assert not any("model" in key or "fallback" in key for key in stats)

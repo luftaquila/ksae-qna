@@ -44,8 +44,9 @@ _model_enabled: dict[str, bool] = {}
 _model_health: dict[str, dict[str, Any]] = {}
 
 PROMPT_VERSION = "2026-08-quality-v3"
-PRIMARY_MODEL_KEY = "gemini-3-pro"
-FALLBACK_MODEL_KEY = "gemini-3-flash"
+PRIMARY_MODEL_KEY = "gemini-3-flash"
+FALLBACK_MODEL_KEY = "gemini-3-pro"
+UTILITY_MODEL_KEY = "gemini-3-flash"
 ROUTING_MODEL_KEYS = (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY)
 CHAT_CREDIT_COST = 1
 
@@ -60,7 +61,7 @@ def _build_collection_registry() -> dict[str, dict]:
         "rules": {
             "collection": "ksae-formula-rules",
             "label": "규정",
-            "description": "2026 대회 규정",
+            "description": "2026 대회 규정 전체 (Formula/Baja/EV)",
             "authority": "공식",
             "source_type": "rules",
             "competition": "formula",
@@ -71,7 +72,7 @@ def _build_collection_registry() -> dict[str, dict]:
         "qna": {
             "collection": "ksae-qna",
             "label": "Q&A",
-            "description": "KSAE Q&A 게시판",
+            "description": "KSAE Q&A 게시판 질의응답",
             "authority": "공식 해석",
             "source_type": "qna",
             "year": "",
@@ -414,7 +415,7 @@ def is_model_available(model: str) -> bool:
 
 
 def get_all_models_admin() -> list[dict]:
-    """Return the fixed Pro-primary/Flash-fallback routing configuration."""
+    """Return the fixed Flash-primary/Pro-fallback routing configuration."""
     result = []
     for model_key in ROUTING_MODEL_KEYS:
         cfg = MODEL_CONFIG[model_key]
@@ -1016,7 +1017,7 @@ async def _rewrite_query(query: str, history: list[dict] | None) -> str | None:
         response = await loop.run_in_executor(
             None,
             lambda: _gemini.models.generate_content(
-                model=MODEL_CONFIG[FALLBACK_MODEL_KEY]["model_id"],
+                model=MODEL_CONFIG[UTILITY_MODEL_KEY]["model_id"],
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     max_output_tokens=150,
@@ -1630,7 +1631,7 @@ JSON 배열로만 응답하세요: [{{"index": 0, "score": 8}}, ...]
         response = await loop.run_in_executor(
             None,
             lambda: _gemini.models.generate_content(
-                model=MODEL_CONFIG[FALLBACK_MODEL_KEY]["model_id"],
+                model=MODEL_CONFIG[UTILITY_MODEL_KEY]["model_id"],
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     max_output_tokens=700,
@@ -1691,7 +1692,7 @@ async def search_and_stream(
 
     history: list of {"role": "user"|"assistant", "content": str} for multi-turn context.
     collections: list of collection keys ("qna", "rules") to search.
-    Model routing is fixed: Gemini Pro first, then Gemini Flash on failure.
+    Model routing is fixed: Gemini Flash first, then Gemini Pro on failure.
     """
     # Legacy callers may still pass ``confidence``; it is intentionally
     # ignored so AARK retrieval always covers the complete collection.

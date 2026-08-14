@@ -679,15 +679,67 @@ def add_credits(user_id: int, amount: int) -> int | None:
     return row["credits"] if row else None
 
 
-def get_transactions(user_id: int, limit: int = 30) -> list[dict]:
-    """Return recent token transactions for a user."""
+def get_transactions(
+    user_id: int,
+    limit: int = 30,
+    *,
+    public_view: bool = False,
+) -> list[dict]:
+    """Return recent token transactions, optionally hiding model details."""
     conn = _get_conn()
     rows = conn.execute(
         "SELECT amount, type, memo, created_at FROM token_transactions WHERE user_id = ? ORDER BY id DESC LIMIT ?",
         (user_id, limit),
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    transactions = [dict(r) for r in rows]
+    if public_view:
+        for transaction in transactions:
+            if transaction["type"] == "usage":
+                transaction["memo"] = "질문"
+            elif transaction["type"] == "refund" and transaction.get("memo", "").startswith(
+                ("오류 환불 (", "요청 저장 실패 환불 (")
+            ):
+                transaction["memo"] = transaction["memo"].split(" (", 1)[0]
+    return transactions
+
+
+def get_user_usage_stats(user_id: int) -> dict:
+    """Return privacy-safe lifetime usage totals for a user's account page."""
+    conn = _get_conn()
+    row = conn.execute(
+        """
+        SELECT
+            (SELECT COUNT(*)
+               FROM sessions
+              WHERE user_id = ?) AS conversation_count,
+            (SELECT COUNT(*)
+               FROM messages m
+               JOIN sessions s ON s.id = m.session_id
+              WHERE s.user_id = ? AND m.role = 'user') AS question_count,
+            (SELECT COALESCE(SUM(ABS(amount)), 0)
+               FROM token_transactions
+              WHERE user_id = ? AND type = 'usage') AS credits_used,
+            (SELECT COALESCE(SUM(amount), 0)
+               FROM token_transactions
+              WHERE user_id = ? AND type = 'refund' AND amount > 0) AS credits_refunded,
+            (SELECT COALESCE(SUM(m.input_tokens), 0)
+               FROM messages m
+               JOIN sessions s ON s.id = m.session_id
+              WHERE s.user_id = ? AND m.role = 'assistant') AS input_tokens,
+            (SELECT COALESCE(SUM(m.output_tokens), 0)
+               FROM messages m
+               JOIN sessions s ON s.id = m.session_id
+              WHERE s.user_id = ? AND m.role = 'assistant') AS output_tokens,
+            (SELECT COALESCE(SUM(m.thinking_tokens), 0)
+               FROM messages m
+               JOIN sessions s ON s.id = m.session_id
+              WHERE s.user_id = ? AND m.role = 'assistant') AS thinking_tokens
+        """,
+        (user_id,) * 7,
+    ).fetchone()
+    conn.close()
+    return dict(row)
 
 
 # ---------------------------------------------------------------------------

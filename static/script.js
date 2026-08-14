@@ -192,9 +192,14 @@ async function loadTransactions() {
       const sign = isUsage ? "" : "+";
       const cls = isUsage ? "usage" : "purchase";
       const date = formatLocal(t.created_at);
+      let memo = t.memo || t.type;
+      if (t.type === "usage") memo = "질문";
+      if (t.type === "refund" && /^(오류 환불|요청 저장 실패 환불) \(/.test(memo)) {
+        memo = memo.split(" (", 1)[0];
+      }
       return `<div class="token-tx ${cls}">
         <div class="token-tx-info">
-          <span class="token-tx-memo">${escapeHtml(t.memo || t.type)}</span>
+          <span class="token-tx-memo">${escapeHtml(memo)}</span>
           <span class="token-tx-date">${date}</span>
         </div>
         <span class="token-tx-amount">${sign}${t.amount}</span>
@@ -472,8 +477,6 @@ function handleEvent(type, data, sourcesContainer, answerEl, state) {
         addAnswerNotice(answerEl, "일부 검색 경로가 실패해 사용 가능한 결과만으로 답변했습니다.");
       }
     } catch (e) { console.warn("Failed to parse retrieval event:", e); }
-  } else if (type === "fallback") {
-    addAnswerNotice(answerEl, "기본 모델 응답에 실패해 대체 모델로 자동 전환했습니다.");
   } else if (type === "credits") {
     try {
       const credits = JSON.parse(data);
@@ -679,7 +682,7 @@ function showWelcome() {
       <div class="welcome-items">
         <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#9889;</span>
-          <span>질문 1회당 이용권 1장이 차감됩니다</span>
+          <span>질문 1회당 이용권 1장이 차감됩니다.<br>매월 1일마다 이용권이 무료로 다시 충전됩니다.</span>
         </div>
         <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#128218;</span>

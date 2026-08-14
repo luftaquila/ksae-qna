@@ -1,6 +1,6 @@
 export const collections = [
-  { key: "rules", label: "규정", description: "2026 대회 규정" },
-  { key: "qna", label: "Q&A", description: "KSAE Q&A 게시판" },
+  { key: "rules", label: "규정", description: "2026 대회 규정 전체 (Formula/Baja/EV)" },
+  { key: "qna", label: "Q&A", description: "KSAE Q&A 게시판 질의응답" },
   { key: "kb", label: "AARK", description: "AARK 익명톡방 (2025년 2월 ~ 2026년 7월)" },
 ];
 
@@ -39,8 +39,8 @@ export const users = [
 
 export const adminModels = [
   {
-    id: "gemini-3-pro",
-    label: "Gemini Pro (Latest)",
+    id: "gemini-3-flash",
+    label: "Gemini Flash (Latest)",
     role: "primary",
     provider: "gemini",
     provider_available: true,
@@ -50,8 +50,8 @@ export const adminModels = [
     resolved_model: null,
   },
   {
-    id: "gemini-3-flash",
-    label: "Gemini Flash (Latest)",
+    id: "gemini-3-pro",
+    label: "Gemini Pro (Latest)",
     role: "fallback",
     provider: "gemini",
     provider_available: true,
@@ -68,15 +68,19 @@ export async function installChatMocks(page) {
     const url = new URL(request.url());
     const path = url.pathname;
     if (path === "/api/me") return route.fulfill({ json: { user: { id: 1, name: "김피트", email: "pit@example.com", picture: null, credits: 18, is_admin: true }, low_credit_threshold: 5, unlimited_credits: false } });
+    if (path === "/api/account/stats") return route.fulfill({ json: { stats: { conversation_count: 12, question_count: 37, credits_used: 35, credits_refunded: 2, input_tokens: 123456, output_tokens: 23456, thinking_tokens: 7890 } } });
     if (path === "/api/collections") return route.fulfill({ json: { collections } });
     if (path === "/api/sessions") return route.fulfill({ json: { sessions: [{ id: 10, title: "Formula 지상고 기준" }] } });
-    if (path === "/api/transactions") return route.fulfill({ json: { transactions: [] } });
+    if (path === "/api/transactions") return route.fulfill({ json: { transactions: [
+      { amount: -1, type: "usage", memo: "질문 (Gemini Pro (Latest))", created_at: "2026-08-14T03:00:00" },
+      { amount: 1, type: "refund", memo: "오류 환불 (Gemini Pro (Latest))", created_at: "2026-08-14T03:01:00" },
+    ] } });
     if (path === "/api/account" && request.method() === "DELETE") return route.fulfill({ json: { ok: true } });
     if (path === "/api/chat") {
       const sources = [{ source: "2026 Formula 규정", score: 0.91, url: "https://example.com/rule", content: "차량의 지상고 측정 조건에 관한 근거입니다." }];
       const body = [
         `event: sources\ndata: ${JSON.stringify(sources)}\n\n`,
-        `event: model\ndata: ${JSON.stringify({ resolved_model: "gemini-pro-latest" })}\n\n`,
+        `event: fallback\ndata: ${JSON.stringify({ from: "gemini-3-flash", to: "gemini-3-pro" })}\n\n`,
         `event: token\ndata: ${JSON.stringify("결론부터 말하면, 측정 조건을 먼저 확인해야 합니다.")}\n\n`,
         `event: credits\ndata: ${JSON.stringify({ remaining: 17 })}\n\n`,
         `event: session\ndata: ${JSON.stringify({ session_id: 11 })}\n\n`,

@@ -52,6 +52,7 @@ from src.auth import (
     get_user_by_google_id,
     get_session,
     get_transactions,
+    get_user_usage_stats,
     init_admin_emails,
     init_db,
     init_oauth,
@@ -70,7 +71,6 @@ from src.auth import (
 from src.chat import (
     CHAT_CREDIT_COST,
     FALLBACK_MODEL_KEY,
-    MODEL_CONFIG,
     PRIMARY_MODEL_KEY,
     PROMPT_VERSION,
     get_public_collections,
@@ -378,6 +378,14 @@ async def account_delete(body: AccountDeleteRequest, request: Request):
     return response
 
 
+@app.get("/api/account/stats")
+async def account_stats(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    return {"stats": get_user_usage_stats(user["id"])}
+
+
 @app.post("/api/credits/topup")
 async def topup(request: Request, body: TopupRequest):
     user = get_current_user(request)
@@ -396,7 +404,7 @@ async def transactions(request: Request):
     user = get_current_user(request)
     if not user:
         return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
-    return {"transactions": get_transactions(user["id"])}
+    return {"transactions": get_transactions(user["id"], public_view=True)}
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +473,7 @@ async def chat(request: Request, req: ChatRequest):
     if not user:
         return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
 
-    # Model routing is server-owned: Pro is always attempted first and Flash
+    # Model routing is server-owned: Flash is always attempted first and Pro
     # is the only fallback. Client payloads cannot select or price a model.
     if not any(is_model_available(key) for key in (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY)):
         return JSONResponse({"error": "답변 모델을 현재 사용할 수 없습니다."}, status_code=503)
@@ -486,9 +494,7 @@ async def chat(request: Request, req: ChatRequest):
             return JSONResponse({"error": "세션을 찾을 수 없습니다"}, status_code=404)
 
     credits_needed = CHAT_CREDIT_COST
-    model_label = MODEL_CONFIG[PRIMARY_MODEL_KEY]["label"]
-
-    if not deduct_credit(user["id"], credits_needed, f"질문 ({model_label})"):
+    if not deduct_credit(user["id"], credits_needed, "질문"):
         return JSONResponse({"error": "이용권이 부족합니다"}, status_code=402)
 
     try:
@@ -519,7 +525,7 @@ async def chat(request: Request, req: ChatRequest):
             update_session_title(session_id, user["id"], req.query[:50])
     except Exception:
         logger.exception("Failed to initialize chat turn")
-        refund_credit(user["id"], credits_needed, f"요청 저장 실패 환불 ({model_label})")
+        refund_credit(user["id"], credits_needed, "요청 저장 실패 환불")
         return JSONResponse({"error": "질문을 저장하지 못했습니다. 다시 시도해주세요."}, status_code=500)
 
     updated_user = get_user_by_id(user["id"])
@@ -593,7 +599,7 @@ async def chat(request: Request, req: ChatRequest):
                     display = user_message if not full_text else f"\n\n---\n*{user_message}*"
                     full_text += display
                     await queue.put(f"event: token\ndata: {json.dumps(display, ensure_ascii=False)}\n\n")
-                elif event_type != "done":
+                elif event_type in {"rewrite", "sources", "retrieval", "token"}:
                     await queue.put(event)
 
                 if event_type == "sources" and isinstance(payload, list):
@@ -642,7 +648,7 @@ async def chat(request: Request, req: ChatRequest):
                 await queue.put(f"event: token\ndata: {json.dumps(full_text, ensure_ascii=False)}\n\n")
         finally:
             if has_error:
-                refund_credit(user["id"], credits_needed, f"오류 환불 ({model_label})")
+                refund_credit(user["id"], credits_needed, "오류 환불")
 
             total_ms = round((time.monotonic() - started_at) * 1000)
             generation_ms = (

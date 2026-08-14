@@ -14,10 +14,12 @@ def test_pro_uses_provider_maintained_latest_alias():
 
 
 def test_chat_routing_and_credit_cost_are_fixed():
-    assert chat.PRIMARY_MODEL_KEY == "gemini-3-pro"
-    assert chat.FALLBACK_MODEL_KEY == "gemini-3-flash"
-    assert chat.MODEL_CONFIG[chat.FALLBACK_MODEL_KEY]["model_id"] == "gemini-flash-latest"
-    assert chat.MODEL_CONFIG[chat.FALLBACK_MODEL_KEY]["thinking_level"] == "high"
+    assert chat.PRIMARY_MODEL_KEY == "gemini-3-flash"
+    assert chat.FALLBACK_MODEL_KEY == "gemini-3-pro"
+    assert chat.UTILITY_MODEL_KEY == "gemini-3-flash"
+    assert chat.MODEL_CONFIG[chat.PRIMARY_MODEL_KEY]["model_id"] == "gemini-flash-latest"
+    assert chat.MODEL_CONFIG[chat.FALLBACK_MODEL_KEY]["model_id"] == "gemini-pro-latest"
+    assert chat.MODEL_CONFIG[chat.PRIMARY_MODEL_KEY]["thinking_level"] == "high"
     assert chat.CHAT_CREDIT_COST == 1
     assert all(chat.get_effective_credits(key) == 1 for key in chat.ROUTING_MODEL_KEYS)
 
@@ -112,6 +114,11 @@ def test_public_collections_exposes_only_broad_source_groups():
     public = chat.get_public_collections()
 
     assert [item["key"] for item in public] == ["rules", "qna", "kb"]
+    assert [item["description"] for item in public] == [
+        "2026 대회 규정 전체 (Formula/Baja/EV)",
+        "KSAE Q&A 게시판 질의응답",
+        "AARK 익명톡방 (2025년 2월 ~ 2026년 7월)",
+    ]
     assert all("filter" not in item for item in public)
     assert all("competition" not in item for item in public)
     assert all("document_type" not in item for item in public)
@@ -479,7 +486,7 @@ def test_aark_search_ignores_legacy_confidence_filter(monkeypatch):
     chat._search_cache.clear()
 
 
-def test_pro_failure_before_first_token_falls_back_to_flash(monkeypatch):
+def test_flash_failure_before_first_token_falls_back_to_pro(monkeypatch):
     async def no_rewrite(_query, _history):
         return None
 
@@ -487,19 +494,19 @@ def test_pro_failure_before_first_token_falls_back_to_flash(monkeypatch):
         return sources
 
     async def fake_stream(_contents, model_key, fallback_from=None):
-        if model_key == "gemini-3-pro":
-            yield 'event: model\ndata: {"resolved_model":"gemini-3-pro"}\n\n'
+        if model_key == "gemini-3-flash":
+            yield 'event: model\ndata: {"resolved_model":"gemini-3-flash"}\n\n'
             error = {"provider": "gemini", "code": "model_not_found", "message": "retired"}
             yield f"event: error\ndata: {json.dumps(error)}\n\n"
             return
         model = {
             "requested_model": fallback_from,
-            "resolved_model": "gemini-3-flash",
-            "resolved_model_id": "gemini-3.7-flash",
+            "resolved_model": "gemini-3-pro",
+            "resolved_model_id": "gemini-pro-latest",
         }
         yield f"event: model\ndata: {json.dumps(model)}\n\n"
         yield 'event: token\ndata: "대체 응답"\n\n'
-        yield 'event: usage\ndata: {"resolved_model":"gemini-3-flash"}\n\n'
+        yield 'event: usage\ndata: {"resolved_model":"gemini-3-pro"}\n\n'
 
     monkeypatch.setattr(chat, "_rewrite_query", no_rewrite)
     monkeypatch.setattr(chat, "_rerank_results", no_rerank)
@@ -520,7 +527,7 @@ def test_pro_failure_before_first_token_falls_back_to_flash(monkeypatch):
     assert not any(event.startswith("event: error") for event in events)
 
 
-def test_flash_is_used_directly_when_pro_is_unavailable(monkeypatch):
+def test_pro_is_used_directly_when_flash_is_unavailable(monkeypatch):
     async def no_rewrite(_query, _history):
         return None
 
@@ -532,7 +539,7 @@ def test_flash_is_used_directly_when_pro_is_unavailable(monkeypatch):
     async def fake_stream(_contents, model_key, fallback_from=None):
         called.append((model_key, fallback_from))
         yield 'event: token\ndata: "대체 응답"\n\n'
-        yield 'event: usage\ndata: {"resolved_model":"gemini-3-flash"}\n\n'
+        yield 'event: usage\ndata: {"resolved_model":"gemini-3-pro"}\n\n'
 
     monkeypatch.setattr(chat, "_rewrite_query", no_rewrite)
     monkeypatch.setattr(chat, "_rerank_results", no_rerank)

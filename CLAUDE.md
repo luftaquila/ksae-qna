@@ -43,7 +43,7 @@ python mcp_server.py
 
 ### Model Routing
 
-- 사용자 모델 선택은 없으며 서버가 Gemini Pro (`gemini-pro-latest`)를 먼저 호출하고 실패하면 정식 Gemini 3.6 Flash (`gemini-3.6-flash`)로 폴백한다
+- 사용자 모델 선택은 없으며 서버가 Gemini Flash (`gemini-flash-latest`)를 먼저 호출하고 실패하면 Gemini Pro (`gemini-pro-latest`)로 폴백한다
 - `src/chat.py`의 `PRIMARY_MODEL_KEY`, `FALLBACK_MODEL_KEY`, `CHAT_CREDIT_COST`가 라우팅과 고정 이용권 비용을 정의한다
 - `MODEL_CONFIG` 딕셔너리는 모델 ID, provider, pricing, thinking level 메타데이터를 보관한다
 - provider별 스트리밍 분리: `_stream_gemini()` (동기 이터레이터를 `run_in_executor`로 래핑), `_stream_anthropic()` (네이티브 async)
