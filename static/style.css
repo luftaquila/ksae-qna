@@ -607,10 +607,6 @@ header {
   scroll-behavior: smooth;
 }
 
-.chat.welcome-mode {
-  overflow-y: hidden;
-}
-
 .login-overlay {
   position: absolute;
   inset: 0;

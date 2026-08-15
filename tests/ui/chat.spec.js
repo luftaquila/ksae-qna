@@ -134,12 +134,10 @@ for (const viewport of [
       horizontal: element.scrollWidth - element.clientWidth,
       vertical: element.scrollHeight - element.clientHeight,
       scrollTop: element.scrollTop,
-      overflowY: getComputedStyle(element).overflowY,
     }));
     expect(overflow.horizontal).toBeLessThanOrEqual(1);
     expect(overflow.vertical).toBeLessThanOrEqual(1);
     expect(overflow.scrollTop).toBe(0);
-    expect(overflow.overflowY).toBe("hidden");
 
     const positions = await page.locator(".welcome").evaluate((element) => {
       const welcome = element.getBoundingClientRect();
