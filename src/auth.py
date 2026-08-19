@@ -125,6 +125,38 @@ def init_db() -> None:
         )
         """
     )
+    # 결제 주문 원장.  금액은 서버만 계산하고, 지급·회수는 status 조건부 UPDATE의
+    # rowcount로 한 번만 통과시킨다 (src/payments.py).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS payments (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id      TEXT    NOT NULL UNIQUE,
+            -- 탈퇴해도 결제 기록 자체는 남긴다.  대금결제 기록은 보존 의무가 있고,
+            -- 사람과의 연결만 끊으면 개인정보는 남지 않는다.
+            user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            user_email    TEXT    NOT NULL,
+            quantity      INTEGER NOT NULL,
+            unit_price    INTEGER NOT NULL,
+            amount        INTEGER NOT NULL,
+            goods_name    TEXT    NOT NULL,
+            status        TEXT    NOT NULL DEFAULT 'pending',
+            method        TEXT,
+            tid           TEXT,
+            granted       INTEGER,
+            reclaimed     INTEGER,
+            fail_reason   TEXT,
+            cancel_reason TEXT,
+            approved_at   TEXT,
+            cancelled_at  TEXT,
+            raw_auth      TEXT,
+            raw_approve   TEXT,
+            raw_cancel    TEXT,
+            created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
     conn.commit()
 
     # New accounts must record the privacy notice accepted after Google OAuth.
@@ -268,6 +300,8 @@ def init_db() -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_turn_id ON messages (turn_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_turns_session_created ON chat_turns (session_id, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_turns_status_created ON chat_turns (status, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_payments_user_created ON payments (user_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_payments_status_created ON payments (status, created_at)")
 
     conn.commit()
     conn.close()
@@ -283,6 +317,18 @@ _SITE_DEFAULTS: dict[str, str] = {
     "monthly_refill_credits": "20",
     "low_credit_threshold": "5",
     "unlimited_credits": "false",
+    # 결제 (src/payments.py).  단가 x 수량으로 금액을 계산한다.
+    "credit_unit_price": "100",
+    "credit_max_quantity": "1000",
+    # 전자상거래법 제10조·제12조 표시사항.  /policy 가 이 값을 그대로 렌더한다.
+    # 관리자 화면에서 덮어쓸 수 있고, 빈 값이면 "미등록"으로 표시된다.
+    "biz_name": "오병준",
+    "biz_owner": "오병준",
+    "biz_reg_no": "486-21-02172",
+    "biz_mail_order_no": "제2025-대전서구-2265호",
+    "biz_address": "대전광역시 유성구 계룡로46번길 61, 204호",
+    "biz_tel": "010-9479-3691",
+    "biz_email": "mail@luftaquila.io",
 }
 
 
@@ -579,8 +625,12 @@ def delete_user_account(user_id: int) -> str:
     """Permanently delete an account and all service data owned by it.
 
     A recently started model response may still try to persist messages, so
-    deletion is rejected while it is active. Old orphaned pending rows do not
-    block withdrawal forever.
+    deletion is rejected while it is active. An open payment window is rejected
+    for the same reason: the approval would land with no one left to credit.
+    Old orphaned pending rows do not block withdrawal forever.
+
+    Payment records themselves survive as anonymous rows — the users row goes
+    away and payments.user_id falls to NULL through ON DELETE SET NULL.
     """
     conn = _get_conn()
     try:
@@ -601,6 +651,19 @@ def delete_user_account(user_id: int) -> str:
         if pending:
             conn.rollback()
             return "pending"
+
+        pending_payment = conn.execute(
+            """SELECT 1
+               FROM payments
+               WHERE user_id = ?
+                 AND status = 'pending'
+                 AND created_at >= datetime('now', '-15 minutes')
+               LIMIT 1""",
+            (user_id,),
+        ).fetchone()
+        if pending_payment:
+            conn.rollback()
+            return "payment_pending"
 
         session_ids = "SELECT id FROM sessions WHERE user_id = ?"
         conn.execute(

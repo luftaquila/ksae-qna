@@ -15,14 +15,19 @@ logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.auth import (
     PRIVACY_CONSENT_VERSION,
-    add_credits,
     add_message,
     admin_bulk_set_credits,
     admin_refill_credits_to_floor,
@@ -84,6 +89,7 @@ from src.chat import (
     search_and_stream,
     set_model_admin_settings,
 )
+from src import payments
 
 load_dotenv()
 
@@ -178,8 +184,15 @@ class SessionPatch(BaseModel):
     title: str = Field(..., min_length=1, max_length=100)
 
 
-class TopupRequest(BaseModel):
-    amount: int = Field(..., ge=1, le=1000)
+class PaymentOrderRequest(BaseModel):
+    # 상·하한은 payments.create_order 가 설정값으로 다시 검증한다.  여기서는
+    # 터무니없는 값이 DB까지 내려가지 않게만 막는다.
+    quantity: int = Field(..., ge=1, le=100000)
+
+
+class PaymentCancelRequest(BaseModel):
+    # 나이스페이 취소사유는 100자까지다.
+    reason: str = Field(default="관리자 취소", min_length=1, max_length=100)
 
 
 class AdminCreditRequest(BaseModel):
@@ -196,6 +209,9 @@ class SiteSettingsRequest(BaseModel):
     monthly_refill_credits: int | None = Field(default=None, ge=0, le=10000)
     low_credit_threshold: int = Field(..., ge=0, le=10000)
     unlimited_credits: bool = Field(default=False)
+    credit_unit_price: int | None = Field(default=None, ge=1, le=1000000)
+    credit_max_quantity: int | None = Field(default=None, ge=1, le=100000)
+    business: dict[str, str] | None = None
 
 
 class BulkCreditRequest(BaseModel):
@@ -224,6 +240,17 @@ async def account_page(request: Request):
     if not get_current_user(request):
         return RedirectResponse(url="/", status_code=302)
     return FileResponse("static/account.html")
+
+
+@app.get("/payments/result")
+async def payment_result_page():
+    """결제창이 돌려보낸 결과를 사람이 읽는 화면.  판정은 이미 서버에서 끝났다."""
+    return FileResponse("static/payment-result.html")
+
+
+@app.get("/policy")
+async def policy_page():
+    return FileResponse("static/policy.html")
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +399,11 @@ async def account_delete(body: AccountDeleteRequest, request: Request):
             {"error": "답변 생성이 끝난 뒤 다시 탈퇴해주세요."},
             status_code=409,
         )
+    if result == "payment_pending":
+        return JSONResponse(
+            {"error": "진행 중인 결제가 끝난 뒤 다시 탈퇴해주세요."},
+            status_code=409,
+        )
     if result != "deleted":
         return JSONResponse({"error": "계정을 찾을 수 없습니다."}, status_code=404)
     response = JSONResponse({"ok": True})
@@ -388,17 +420,111 @@ async def account_stats(request: Request):
     return {"stats": get_user_usage_stats(user["id"])}
 
 
-@app.post("/api/credits/topup")
-async def topup(request: Request, body: TopupRequest):
+# ---------------------------------------------------------------------------
+# Payments (NicePay 결제창 서버승인 — src/payments.py)
+# ---------------------------------------------------------------------------
+def _site_base(request: Request) -> str:
+    """returnUrl 은 절대 경로여야 한다.  SITE_URL 이 없으면 요청 기준으로 만든다."""
+    configured = os.environ.get("SITE_URL", "").strip()
+    return configured.rstrip("/") if configured else str(request.base_url).rstrip("/")
+
+
+def _public_payment(row: dict) -> dict:
+    """사용자에게 보이는 결제 내역.  거래키와 원문은 내보내지 않는다."""
+    return {
+        "order_id": row["order_id"],
+        "goods_name": row["goods_name"],
+        "quantity": row["quantity"],
+        "amount": row["amount"],
+        "status": row["status"],
+        "method": row["method"],
+        "created_at": row["created_at"],
+        "approved_at": row["approved_at"],
+        "cancelled_at": row["cancelled_at"],
+        # 실패 사유는 본인 주문에 대한 안내문이라 그대로 보여준다.
+        "fail_reason": row["fail_reason"],
+    }
+
+
+def _admin_payment(row: dict) -> dict:
+    """관리자 화면용.  취소에 필요한 값까지 싣되 원문 JSON 은 뺀다."""
+    return _public_payment(row) | {
+        "user_id": row["user_id"],
+        "user_email": row["user_email"],
+        "unit_price": row["unit_price"],
+        "tid": row["tid"],
+        "granted": row["granted"],
+        "reclaimed": row["reclaimed"],
+        "cancel_reason": row["cancel_reason"],
+    }
+
+
+@app.get("/api/payments/config")
+async def payments_config():
+    return {"payment": payments.public_config()}
+
+
+@app.post("/api/payments/orders")
+async def payments_create_order(body: PaymentOrderRequest, request: Request):
     user = get_current_user(request)
     if not user:
         return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    if not payments.is_configured():
+        return JSONResponse({"error": "결제가 준비되지 않았습니다"}, status_code=503)
 
-    new_balance = add_credits(user["id"], body.amount)
-    if new_balance is None:
-        return JSONResponse({"error": "충전량은 1~1000 사이여야 합니다"}, status_code=400)
+    try:
+        order = payments.create_order(user["id"], user["email"], body.quantity)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
 
-    return {"credits": new_balance}
+    return {
+        "order_id": order["order_id"],
+        "amount": order["amount"],
+        "quantity": order["quantity"],
+        "goods_name": order["goods_name"],
+        "client_id": payments.client_id(),
+        "method": payments.PAY_METHOD,
+        "return_url": f"{_site_base(request)}/api/payments/return",
+        "buyer_name": user["name"],
+        "buyer_email": user["email"],
+    }
+
+
+@app.post("/api/payments/return")
+async def payments_return(request: Request):
+    """결제창 인증 결과.  나이스페이 도메인에서 넘어오는 cross-site POST 라
+    SameSite=Lax 인 로그인 쿠키가 실려 오지 않는다.  소유자 판단은 주문 행이 한다."""
+    form = await request.form()
+    fields = {key: value for key, value in form.items() if isinstance(value, str)}
+    order_id, result = await payments.process_return(fields)
+
+    query = f"?result={result}"
+    if order_id:
+        query += f"&order={order_id}"
+    return RedirectResponse(url=f"/payments/result{query}", status_code=303)
+
+
+@app.post("/api/payments/webhook")
+async def payments_webhook(request: Request):
+    """승인·취소 비동기 통보.  본문에 "OK" 가 없으면 나이스페이가 실패로 보고
+    재전송하므로, 처리 중 예외는 삼키지 않고 그대로 5xx 로 흘려 재전송을 받는다."""
+    payload = await request.json()
+    if isinstance(payload, dict):
+        await asyncio.to_thread(payments.process_webhook, payload)
+    return PlainTextResponse("OK", media_type="text/html; charset=utf-8")
+
+
+@app.get("/api/payments")
+async def payments_list(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    return {"payments": [_public_payment(row) for row in payments.list_orders(user["id"])]}
+
+
+@app.get("/api/policy")
+async def policy_info():
+    return {"business": payments.business_info(), "payment": payments.public_config()}
 
 
 @app.get("/api/transactions")
@@ -917,7 +1043,35 @@ async def admin_update_settings(body: SiteSettingsRequest, request: Request):
         set_site_setting("monthly_refill_credits", str(body.monthly_refill_credits))
     set_site_setting("low_credit_threshold", str(body.low_credit_threshold))
     set_site_setting("unlimited_credits", str(body.unlimited_credits).lower())
+    if body.credit_unit_price is not None:
+        set_site_setting("credit_unit_price", str(body.credit_unit_price))
+    if body.credit_max_quantity is not None:
+        set_site_setting("credit_max_quantity", str(body.credit_max_quantity))
+    if body.business is not None:
+        for key, value in body.business.items():
+            if key in payments.BUSINESS_SETTING_KEYS:
+                set_site_setting(key, str(value)[:200])
     return {"ok": True, "settings": get_all_site_settings()}
+
+
+@app.get("/api/admin/payments")
+async def admin_payments(request: Request):
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    return {"payments": [_admin_payment(row) for row in payments.list_orders(limit=200)]}
+
+
+@app.post("/api/admin/payments/{order_id}/cancel")
+async def admin_payment_cancel(
+    order_id: str, body: PaymentCancelRequest, request: Request
+):
+    """전액 취소.  나이스페이 취소가 성립한 뒤에만 이용권을 회수한다."""
+    if not is_admin(request):
+        return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
+    result = await payments.admin_cancel(order_id, body.reason)
+    if not result["ok"]:
+        return JSONResponse({"error": result["error"]}, status_code=400)
+    return result
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")

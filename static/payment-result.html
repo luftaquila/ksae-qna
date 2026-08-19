@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>PitBot · 결제 결과</title>
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/account.css">
+  <script>
+    (function() {
+      var t = localStorage.getItem("theme");
+      if (t) document.documentElement.setAttribute("data-theme", t);
+      else if (window.matchMedia("(prefers-color-scheme: dark)").matches)
+        document.documentElement.setAttribute("data-theme", "dark");
+    })();
+  </script>
+</head>
+<body class="account-page">
+  <main class="account-shell">
+    <a href="/" class="account-brand">
+      <img src="/static/logo.svg" alt="" class="header-logo">
+      <span>PitBot</span>
+    </a>
+
+    <section class="account-card" aria-labelledby="result-title">
+      <p class="account-eyebrow">이용권 구매</p>
+      <h1 id="result-title">결제 결과를 확인하는 중입니다</h1>
+      <p id="result-message" class="account-description" aria-live="polite"></p>
+
+      <div id="result-detail" class="privacy-notice" hidden>
+        <dl>
+          <div><dt>상품</dt><dd id="detail-goods">—</dd></div>
+          <div><dt>수량</dt><dd id="detail-quantity">—</dd></div>
+          <div><dt>결제금액</dt><dd id="detail-amount">—</dd></div>
+          <div><dt>주문번호</dt><dd id="detail-order">—</dd></div>
+        </dl>
+      </div>
+
+      <p id="result-balance" class="account-retention"></p>
+
+      <div class="account-actions">
+        <a href="/policy" class="secondary-action">이용약관 · 환불규정</a>
+        <a href="/" class="primary-action">채팅으로 돌아가기</a>
+      </div>
+    </section>
+  </main>
+  <script src="/static/payment-result.js"></script>
+</body>
+</html>

@@ -40,6 +40,7 @@
       <button class="admin-tab active" type="button" role="tab" aria-selected="true" data-tab="users">사용자</button>
       <button class="admin-tab" type="button" role="tab" aria-selected="false" data-tab="conversations">대화 기록</button>
       <button class="admin-tab" type="button" role="tab" aria-selected="false" data-tab="models">모델</button>
+      <button class="admin-tab" type="button" role="tab" aria-selected="false" data-tab="payments">결제</button>
       <button class="admin-tab" type="button" role="tab" aria-selected="false" data-tab="settings">설정</button>
     </div>
 
@@ -87,6 +88,28 @@
         <div id="models-grid" class="models-grid"></div>
       </div>
 
+      <!-- Payments Tab -->
+      <div id="tab-payments" class="tab-panel">
+        <p class="settings-description">
+          결제 취소는 나이스페이 전액 취소를 요청하고, 성공했을 때만 지급된 이용권을 회수합니다.
+          이미 사용한 이용권은 잔액이 있는 만큼만 회수됩니다.
+        </p>
+        <table class="users-table">
+          <thead>
+            <tr>
+              <th>구매자</th>
+              <th>상품</th>
+              <th>금액</th>
+              <th>상태</th>
+              <th>일시</th>
+              <th>주문번호</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="payments-tbody"></tbody>
+        </table>
+      </div>
+
       <!-- Settings Tab -->
       <div id="tab-settings" class="tab-panel">
         <p class="settings-description">사이트 전역 설정을 관리합니다.</p>
@@ -123,6 +146,33 @@
               <input type="number" id="setting-low-credit-threshold" min="0" max="10000" value="5">
             </div>
             <p class="settings-hint">이용권이 이 값 이하일 때 이용권 칩이 빨간색으로 표시됩니다</p>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label settings-section-title" for="setting-credit-unit-price">이용권 판매 단가</label>
+            <div class="settings-input-group">
+              <input type="number" id="setting-credit-unit-price" min="1" max="1000000" value="100">
+            </div>
+            <p class="settings-hint" id="unit-price-hint">이용권 1장의 판매 가격(원)</p>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label" for="setting-credit-max-quantity">1회 최대 구매 수량</label>
+            <div class="settings-input-group">
+              <input type="number" id="setting-credit-max-quantity" min="1" max="100000" value="1000">
+            </div>
+            <p class="settings-hint">한 번의 결제로 살 수 있는 이용권 수 상한</p>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label settings-section-title">판매자 정보 (전자상거래 고지)</label>
+            <div class="settings-business">
+              <input type="text" id="setting-biz-name" placeholder="상호" maxlength="200">
+              <input type="text" id="setting-biz-owner" placeholder="대표자" maxlength="200">
+              <input type="text" id="setting-biz-reg-no" placeholder="사업자등록번호" maxlength="200">
+              <input type="text" id="setting-biz-mail-order-no" placeholder="통신판매업신고번호" maxlength="200">
+              <input type="text" id="setting-biz-address" placeholder="사업장 주소" maxlength="200">
+              <input type="text" id="setting-biz-tel" placeholder="연락처" maxlength="200">
+              <input type="email" id="setting-biz-email" placeholder="이메일" maxlength="200">
+            </div>
+            <p class="settings-hint">/policy 페이지에 그대로 표시됩니다. 비워두면 "미등록"으로 나옵니다</p>
           </div>
           <div class="settings-row">
             <label class="settings-label settings-section-title">전체 사용자 이용권 일괄 변경</label>

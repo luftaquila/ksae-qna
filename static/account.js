@@ -3,6 +3,7 @@ const confirmation = document.getElementById("delete-confirmation");
 const deleteButton = document.getElementById("delete-account");
 const error = document.getElementById("account-error");
 const statsHost = document.getElementById("usage-stats");
+const paymentListHost = document.getElementById("payment-list");
 
 const statTargets = {
   conversation_count: document.getElementById("stat-conversations"),
@@ -84,5 +85,53 @@ deleteButton.addEventListener("click", async () => {
   }
 });
 
+const PAYMENT_STATUS = {
+  pending: "결제 진행 중",
+  paid: "결제 완료",
+  failed: "결제 실패",
+  cancelled: "결제 취소",
+};
+
+function formatLocal(value) {
+  if (!value) return "";
+  const date = new Date(value.includes("Z") || value.includes("+") ? value : `${value}Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+async function loadPayments() {
+  if (!paymentListHost) return;
+  try {
+    const response = await fetch("/api/payments");
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    const payments = data.payments || [];
+
+    if (!payments.length) {
+      paymentListHost.innerHTML = `<div class="payment-empty">결제 내역이 없습니다</div>`;
+      return;
+    }
+
+    paymentListHost.innerHTML = payments.map((payment) => {
+      const status = PAYMENT_STATUS[payment.status] || payment.status;
+      const when = formatLocal(payment.approved_at || payment.cancelled_at || payment.created_at);
+      const note = payment.status === "failed" && payment.fail_reason ? payment.fail_reason : "";
+      return `<div class="payment-row payment-${escapeAttr(payment.status)}">
+        <div class="payment-row-info">
+          <span class="payment-goods">${escapeHtml(payment.goods_name)}</span>
+          <span class="payment-meta">${escapeHtml(when)} · ${escapeHtml(status)}</span>
+          ${note ? `<span class="payment-note">${escapeHtml(note)}</span>` : ""}
+          <span class="payment-order">${escapeHtml(payment.order_id)}</span>
+        </div>
+        <span class="payment-amount">${Number(payment.amount).toLocaleString("ko-KR")}원</span>
+      </div>`;
+    }).join("");
+  } catch {
+    paymentListHost.innerHTML = `<div class="payment-empty">불러오지 못했습니다</div>`;
+  }
+}
+
 loadAccount();
 loadUsageStats();
+loadPayments();

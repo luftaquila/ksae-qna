@@ -225,3 +225,50 @@
   .usage-stats > div { padding: 12px; }
   .usage-stats strong { font-size: 18px; }
 }
+
+/* 결제 내역 */
+.payment-list {
+  margin-top: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.payment-empty {
+  padding: 22px 14px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.payment-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+
+.payment-row + .payment-row { border-top: 1px solid var(--border-color); }
+
+.payment-row-info {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.payment-goods { font-weight: 700; }
+.payment-meta { color: var(--text-tertiary); font-size: 12px; }
+.payment-note { color: var(--badge-low-color); font-size: 12px; }
+
+.payment-order {
+  overflow-wrap: anywhere;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.payment-amount { flex: 0 0 auto; font-weight: 700; }
+.payment-cancelled .payment-amount,
+.payment-failed .payment-amount { color: var(--text-tertiary); text-decoration: line-through; }
