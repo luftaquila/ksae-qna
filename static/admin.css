@@ -497,6 +497,21 @@
 .user-conversation-link .user-picture { flex: 0 0 auto; }
 .user-conversation-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* 이름 위, 이메일 아래 — 이메일은 이름의 식별자라 같은 셀에 쌓는다. */
+.user-conversation-link .user-identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.user-conversation-link .user-email {
+  max-width: 100%;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .last-active-cell,
 .api-token-cell {
   white-space: nowrap;
@@ -968,23 +983,16 @@
     padding: 10px 8px;
   }
 
-  .users-table th:nth-child(1) { width: 20%; }
-  .users-table th:nth-child(2) { width: 37%; }
-  .users-table th:nth-child(3) { width: 43%; }
+  .users-table th:nth-child(1) { width: 57%; }
+  .users-table th:nth-child(2) { width: 43%; }
 
-  .users-table th:nth-child(n + 4),
-  .users-table td:nth-child(n + 4) {
+  .users-table th:nth-child(n + 3),
+  .users-table td:nth-child(n + 3) {
     display: none;
   }
 
   .users-table td:nth-child(1) {
     word-break: keep-all;
-  }
-
-  .users-table td:nth-child(2) {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .credit-cell { gap: 5px; }
