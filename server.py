@@ -114,9 +114,22 @@ def _ensure_jwt_secret() -> str:
 JWT_SECRET = _ensure_jwt_secret()
 
 
-async def _monthly_credit_refill_worker() -> None:
-    """Check hourly and apply the KST month-start refill exactly once."""
+async def _hourly_maintenance_worker() -> None:
+    """Hourly housekeeping: the KST month-start refill and stale order cleanup.
+
+    Both want the same cadence and neither is urgent, so they share one loop
+    rather than two timers racing to wake the process.
+    """
     while True:
+        try:
+            expired = await asyncio.to_thread(payments.expire_stale_orders)
+            if expired:
+                logger.info("Marked %s abandoned payment orders as expired", expired)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Stale payment order cleanup failed")
+
         try:
             result = await asyncio.to_thread(apply_monthly_credit_refill)
             if result["applied"]:
@@ -131,6 +144,7 @@ async def _monthly_credit_refill_worker() -> None:
             raise
         except Exception:
             logger.exception("Monthly credit refill failed")
+
         await asyncio.sleep(3600)
 
 
@@ -142,13 +156,13 @@ async def lifespan(app: FastAPI):
     init_site_settings()
     init_resources()
     init_model_settings()
-    refill_task = asyncio.create_task(_monthly_credit_refill_worker())
+    maintenance_task = asyncio.create_task(_hourly_maintenance_worker())
     try:
         yield
     finally:
-        refill_task.cancel()
+        maintenance_task.cancel()
         with suppress(asyncio.CancelledError):
-            await refill_task
+            await maintenance_task
 
 
 app = FastAPI(lifespan=lifespan)

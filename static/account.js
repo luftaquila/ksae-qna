@@ -90,6 +90,7 @@ const PAYMENT_STATUS = {
   paid: "결제 완료",
   failed: "결제 실패",
   cancelled: "결제 취소",
+  expired: "미완료",
 };
 
 function formatLocal(value) {
