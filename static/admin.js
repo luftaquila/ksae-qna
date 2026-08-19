@@ -110,10 +110,6 @@ function sortUsers(users) {
         va = (a.name || "").toLowerCase();
         vb = (b.name || "").toLowerCase();
         return va < vb ? -1 : va > vb ? 1 : 0;
-      case "email":
-        va = (a.email || "").toLowerCase();
-        vb = (b.email || "").toLowerCase();
-        return va < vb ? -1 : va > vb ? 1 : 0;
       case "credits":
         return (a.credits || 0) - (b.credits || 0);
       case "tokens":
@@ -171,8 +167,7 @@ function renderUsers(filter = "") {
       const totalThink = u.total_thinking_tokens || 0;
       const cost = estimateModelCost(u.model_usage || []);
       return `<tr data-user-id="${u.id}">
-        <td><button class="user-conversation-link" type="button" onclick="openUserConversations(${u.id})" aria-label="${escapeAttr(u.name)} 사용자의 대화 기록 보기">${pic}<span>${escapeHtml(u.name)}</span></button></td>
-        <td>${escapeHtml(u.email)}</td>
+        <td><button class="user-conversation-link" type="button" onclick="openUserConversations(${u.id})" aria-label="${escapeAttr(u.name)} 사용자의 대화 기록 보기">${pic}<span class="user-identity"><span>${escapeHtml(u.name)}</span><span class="user-email">${escapeHtml(u.email)}</span></span></button></td>
         <td>
           <div class="credit-cell" id="credit-cell-${u.id}">
             <div class="token-wrapper">
