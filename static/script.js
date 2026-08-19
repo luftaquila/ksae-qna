@@ -294,6 +294,8 @@ async function handleTokenPurchase() {
     if (typeof AUTHNICE === "undefined") throw new Error("결제 모듈을 불러오지 못했습니다.");
 
     // 결제창은 새 창이나 리다이렉트로 열린다. 결과 판정은 returnUrl 쪽 서버가 한다.
+    // fnError는 SDK가 필수로 요구한다 — 함수가 아니면 requestPay가 바로 거부한다.
+    // 결제창을 띄우지도 못한 경우만 여기로 오고, 인증 이후의 실패는 returnUrl로 간다.
     AUTHNICE.requestPay({
       clientId: order.client_id,
       method: order.method,
@@ -303,6 +305,12 @@ async function handleTokenPurchase() {
       returnUrl: order.return_url,
       buyerName: order.buyer_name,
       buyerEmail: order.buyer_email,
+      fnError: (error) => {
+        const message = error?.errorMsg || error?.resultMsg || "결제를 진행하지 못했습니다.";
+        if (summary) summary.textContent = message;
+        else alert(message);
+        button.disabled = false;
+      },
     });
   } catch (cause) {
     if (summary) summary.textContent = cause.message;
