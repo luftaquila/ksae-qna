@@ -130,6 +130,14 @@ section 상한이 따로 있는 이유는 지식베이스에서 항목 하나가
   거래별로 추적하지 않고, 우리 잘못에 대한 보상은 구매분으로 세지 않는 편이 맞다
 - 월 자동 충전은 `monthly_credit_refills`의 월별 PK로 중복 실행을 막고, 관리자는 같은 floor 충전을 즉시 실행 가능
 - 세션 삭제는 soft delete (`deleted_at` 컬럼) — 사용자에게는 숨기고 관리자는 열람 가능
+- **회원 탈퇴도 soft delete다.** `users.deleted_at`을 찍고 이용권을 0으로 내리며, 대화·메시지·
+  chat_turns·이용 내역은 실제로 삭제한다. 행을 남기는 이유는 같은 구글 계정으로 다시 들어올 때
+  처음 온 사람과 구분하기 위해서다 — 하드 삭제하면 탈퇴·재가입을 반복해 기본 지급 이용권을
+  계속 새로 받을 수 있다. `get_or_create_user()`가 되살릴 때 기본 지급을 하지 않고,
+  `get_user_by_id()`는 `deleted_at IS NULL`로 걸러 남은 JWT를 무효화한다
+- 탈퇴 계정은 월 충전(`_refill_users_to_floor`)과 일괄 조정(`admin_bulk_set_credits`)에서도
+  빠진다. 채워두면 되살아나는 순간 그 이용권을 그대로 받게 되고, 월 충전은 매달 저절로 돌기
+  때문에 이걸 놓치면 구멍이 자동으로 다시 열린다
 
 ### Payments (NicePay 결제창 서버승인)
 

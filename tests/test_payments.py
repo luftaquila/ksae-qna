@@ -503,16 +503,18 @@ def test_withdrawal_waits_for_an_open_payment_window(tmp_path, monkeypatch):
     assert auth.delete_user_account(user_id) == "payment_pending"
 
 
-def test_settled_payments_outlive_the_account_as_anonymous_rows(tmp_path, monkeypatch):
+def test_settled_payments_outlive_the_account(tmp_path, monkeypatch):
     _init(tmp_path, monkeypatch)
     user_id = _add_user()
     order = _settle(monkeypatch, user_id)
 
     assert auth.delete_user_account(user_id) == "deleted"
 
+    # 탈퇴는 users 행을 남기므로 주문도 그 행을 계속 가리킨다 — 원장이 대사 가능한
+    # 상태로 유지되는 쪽이다.
     stored = payments.get_order(order["order_id"])
     assert stored is not None
-    assert stored["user_id"] is None
+    assert stored["user_id"] == user_id
     assert stored["status"] == "paid"
 
 
@@ -523,8 +525,12 @@ def test_an_approval_for_a_departed_buyer_is_recorded_without_granting(
     user_id = _add_user()
     order = payments.create_order(user_id, "buyer@example.com", 10)
 
-    # 결제창이 열려 있는 사이 계정이 사라진 상황을 직접 만든다.
+    # 결제창이 열려 있는 사이 계정 행까지 사라진 상황. 탈퇴는 행을 남기므로 실제로는
+    # 관리자가 직접 지운 경우뿐이지만, 지급 대상이 없을 때 승인만 기록되는지를 본다.
     conn = auth._get_conn()
+    conn.execute(
+        "UPDATE payments SET user_id = NULL WHERE order_id = ?", (order["order_id"],)
+    )
     conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
