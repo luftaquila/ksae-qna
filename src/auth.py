@@ -159,6 +159,13 @@ def init_db() -> None:
     )
     conn.commit()
 
+    # 탈퇴한 계정은 행을 남기고 표시만 한다.  하드 삭제하면 같은 구글 계정으로
+    # 다시 들어와도 처음 온 사람과 구분되지 않아 기본 지급 이용권을 계속 새로 받는다.
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN deleted_at TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
     # 구매한 이용권은 월 충전의 바닥값에 잡히면 안 된다.  `credits` 는 계속
     # "총 잔액"이고, 그중 구매분이 얼마인지만 여기에 따로 적는다 — 잔액을 읽는
     # 코드는 전부 그대로 두고 충전 기준만 무료분으로 바꾸기 위해서다.
@@ -392,14 +399,21 @@ def _refill_users_to_floor(
     transaction_type: str,
     memo: str,
 ) -> tuple[int, int]:
-    """Raise the *free* portion of each balance to *target*.
+    """Raise the *free* portion of each live balance to *target*.
 
     Purchased credits are excluded from the comparison and from the result.
     Buying used to push the total past the floor and silently cancel the next
     month's grant — paying must not cost a user their free allowance.
+
+    Retired accounts are skipped. Topping one up would hand the credits over
+    the moment it was revived, which is the thing keeping the row is meant to
+    prevent — and the refill runs every month on its own.
     """
     rows = conn.execute(
-        "SELECT id, credits, paid_credits FROM users WHERE credits - paid_credits < ? ORDER BY id",
+        """SELECT id, credits, paid_credits
+             FROM users
+            WHERE credits - paid_credits < ? AND deleted_at IS NULL
+            ORDER BY id""",
         (target,),
     ).fetchall()
     total_credits = 0
@@ -588,8 +602,13 @@ def get_or_create_user(
     ).fetchone()
 
     if row:
+        # 되살아나는 계정에는 기본 지급 이용권을 주지 않는다.  탈퇴와 재가입을
+        # 반복해 무료 지급분을 계속 받아내는 길을 막는 것이 행을 남기는 이유다.
         conn.execute(
-            "UPDATE users SET email=?, name=?, picture=?, updated_at=datetime('now') WHERE google_id=?",
+            """UPDATE users
+                  SET email=?, name=?, picture=?, deleted_at=NULL,
+                      updated_at=datetime('now')
+                WHERE google_id=?""",
             (email, name, picture, google_id),
         )
         conn.commit()
@@ -629,22 +648,31 @@ def get_user_by_google_id(google_id: str) -> dict | None:
 
 
 def get_user_by_id(user_id: int) -> dict | None:
+    """탈퇴한 계정은 없는 것으로 다룬다 — 남아 있는 JWT로 계속 쓰지 못하게."""
     conn = _get_conn()
-    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM users WHERE id = ? AND deleted_at IS NULL", (user_id,)
+    ).fetchone()
     conn.close()
     return dict(row) if row else None
 
 
 def delete_user_account(user_id: int) -> str:
-    """Permanently delete an account and all service data owned by it.
+    """Retire an account: drop its service data and mark the row deleted.
+
+    The users row itself stays behind so that signing back in with the same
+    Google account is recognised as a return rather than a first visit — a
+    hard delete let anyone collect the default credit grant again on every
+    round trip. Credits go to zero and the conversation history, chat turns
+    and credit ledger are removed outright.
 
     A recently started model response may still try to persist messages, so
     deletion is rejected while it is active. An open payment window is rejected
     for the same reason: the approval would land with no one left to credit.
     Old orphaned pending rows do not block withdrawal forever.
 
-    Payment records themselves survive as anonymous rows — the users row goes
-    away and payments.user_id falls to NULL through ON DELETE SET NULL.
+    Payment records keep pointing at the retired row, which is what the
+    ledger needs to stay reconcilable.
     """
     conn = _get_conn()
     try:
@@ -690,7 +718,13 @@ def delete_user_account(user_id: int) -> str:
         )
         conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM token_transactions WHERE user_id = ?", (user_id,))
-        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.execute(
+            """UPDATE users
+                  SET credits = 0, paid_credits = 0,
+                      deleted_at = datetime('now'), updated_at = datetime('now')
+                WHERE id = ?""",
+            (user_id,),
+        )
         conn.commit()
         return "deleted"
     except Exception:
@@ -1144,6 +1178,7 @@ def list_all_users() -> list[dict]:
         FROM users u
         LEFT JOIN sessions s ON s.user_id = u.id
         LEFT JOIN messages m ON m.session_id = s.id AND m.role = 'assistant'
+        WHERE u.deleted_at IS NULL
         GROUP BY u.id
         ORDER BY u.created_at DESC
         """
@@ -1174,6 +1209,7 @@ def get_admin_overview_stats(
                COALESCE(SUM(credits), 0) AS current_credits,
                COALESCE(SUM(CASE WHEN credits <= ? THEN 1 ELSE 0 END), 0) AS low_credit_users
           FROM users
+         WHERE deleted_at IS NULL
         """,
         (low_credit_threshold,),
     ).fetchone()
@@ -1403,7 +1439,8 @@ def admin_set_credits(user_id: int, credits: int, memo: str = "관리자 조정"
 def admin_bulk_set_credits(credits: int, memo: str = "관리자 일괄 조정") -> int:
     """Set all users' credits to an absolute value and record the delta for each. Returns affected count."""
     conn = _get_conn()
-    rows = conn.execute("SELECT id, credits FROM users").fetchall()
+    # 탈퇴한 계정은 건드리지 않는다 — 되살아날 때 그 이용권을 그대로 받게 된다.
+    rows = conn.execute("SELECT id, credits FROM users WHERE deleted_at IS NULL").fetchall()
     affected = 0
     for r in rows:
         delta = credits - r["credits"]
