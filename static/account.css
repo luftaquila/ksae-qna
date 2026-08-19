@@ -272,3 +272,11 @@
 .payment-amount { flex: 0 0 auto; font-weight: 700; }
 .payment-cancelled .payment-amount,
 .payment-failed .payment-amount { color: var(--text-tertiary); text-decoration: line-through; }
+
+/* 판매자 정보 라벨에는 "사업자등록번호"(7자)가 들어간다. 공용 76px 열에서는 마지막
+   글자가 넘쳐 잘리므로, 회원가입 고지의 짧은 라벨과 폭을 공유하지 않는다. */
+.policy-facts dl div { grid-template-columns: 112px 1fr; }
+
+@media (max-width: 520px) {
+  .policy-facts dl div { grid-template-columns: 1fr; }
+}

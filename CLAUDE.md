@@ -118,7 +118,16 @@ section 상한이 따로 있는 이유는 지식베이스에서 항목 하나가
 - 이용권 차감: 질문당 항상 1장, `deduct_credit(user_id, amount, memo)`의 `WHERE credits >= ?`로 원자적 차감
 - LLM 에러 시 `refund_credit()`으로 환불
 - `unlimited_credits` 모드: site_settings에서 토글, `deduct_credit`/`refund_credit`이 스킵
-- `monthly_refill_credits`: 매월 1일(KST) 잔액이 설정값 미만인 사용자만 설정값까지 충전
+- **유료 구매분과 무료 충전분은 분리된다.** `users.credits`는 여전히 **총 잔액**이고,
+  그중 구매분이 얼마인지만 `users.paid_credits`에 따로 적는다(불변식 `0 <= paid_credits <= credits`,
+  무료분 = `credits - paid_credits`). 잔액을 읽는 코드를 전부 그대로 두고 충전 기준만
+  바꾸기 위한 선택이다
+- `monthly_refill_credits`: 매월 1일(KST) **무료분**이 설정값 미만인 사용자만 설정값까지 충전.
+  구매분은 비교와 결과에서 모두 제외된다 — 이용권을 사서 총 잔액이 바닥값을 넘었다는 이유로
+  다음 달 무료 충전이 사라지면 돈 낸 사람이 손해를 본다
+- 차감은 **무료분 먼저**다. 무료분은 매월 돌아오고 구매분은 만료가 없으니, 이 순서라야 구매가
+  녹아 없어지지 않는다. 환불(`refund_credit`)은 무료분으로 들어간다 — 어느 쪽에서 나갔는지
+  거래별로 추적하지 않고, 우리 잘못에 대한 보상은 구매분으로 세지 않는 편이 맞다
 - 월 자동 충전은 `monthly_credit_refills`의 월별 PK로 중복 실행을 막고, 관리자는 같은 floor 충전을 즉시 실행 가능
 - 세션 삭제는 soft delete (`deleted_at` 컬럼) — 사용자에게는 숨기고 관리자는 열람 가능
 
@@ -135,13 +144,20 @@ section 상한이 따로 있는 이유는 지식베이스에서 항목 하나가
   같은 트랜잭션에 넣는다. returnUrl과 웹훅이 겹쳐도 이중 지급이 없다
 - 서명: returnUrl은 `sha256(authToken + clientId + amount + secretKey)`,
   승인응답·웹훅은 `sha256(tid + amount + ediDate + secretKey)`. 둘 다 `hmac.compare_digest`로 비교
+- **결제 API는 Bearer 토큰만 받는다.** `/v1/payments/*`에 Basic을 보내면 조회조차 `U103`
+  "사용자 인증타입이 맞지 않습니다"로 거절된다. Basic이 통하는 곳은 `/v1/access-token` 하나뿐이고,
+  거기서 받은 토큰을 30분(여유 2분) 캐시해서 쓴다. `U103`이 오면 한 번만 재발급해 재시도한다 —
+  인증 계층에서 잘린 것이라 요청 흔적이 없어 승인 요청이라도 재시도가 안전하다. 다른 코드는 재시도 금지
+- **결제창 SDK는 문서보다 소스가 정확하다.** `AUTHNICE.requestPay()`는 `fnError`를 필수로 요구하는데
+  문서 페이지에는 없다. 파라미터를 의심할 일이 생기면 `curl https://pay.nicepay.co.kr/v1/js/`로 직접 읽을 것
 - 승인 API가 timeout/네트워크 오류로 끊기면 승인 성립 여부를 알 수 없으므로 **망취소**
   (`/v1/payments/netcancel`, 1시간 이내)를 던지고 주문을 failed로 내린다
 - 웹훅은 본문에 `OK`가 없으면 나이스페이가 실패로 보고 재전송한다. 처리 중 예외는 삼키지 않는다
 - **카드 최소 승인금액은 1,000원**(오류코드 3041)이다. `min_quantity()`가 단가에서 최소 구매
   수량을 역산하므로, 단가를 낮추면 최소 구매 수량이 자동으로 올라간다
-- 취소는 관리자 전액 취소만이다. 이미 쓴 이용권까지 뺏어 잔액을 음수로 만들지 않고,
-  잔액 범위 내에서만 회수한 뒤 실제 회수량을 `payments.reclaimed`에 남긴다
+- 지급은 `credits`와 `paid_credits`를 같이 올린다. 취소는 관리자 전액 취소만이고, 회수는
+  **남아 있는 구매분 범위에서만** 한다 — 이미 쓴 몫을 무료 충전분에서 빼오면 결제와 무관한
+  이용권을 뺏는 셈이다. 실제 회수량은 `payments.reclaimed`에 남는다
 - 결제 기록은 탈퇴해도 남는다. `payments.user_id`가 `ON DELETE SET NULL`로 끊겨 익명화되고,
   진행 중인 결제가 있으면 `delete_user_account()`가 `"payment_pending"`으로 탈퇴를 막는다
 - 단가·구매 상한·판매자 정보는 `site_settings`에 있고 `/admin` 설정 탭에서 바꾼다. `/policy`가
@@ -150,7 +166,8 @@ section 상한이 따로 있는 이유는 지식베이스에서 항목 하나가
 ### Database
 
 SQLite (`data/users.db`), WAL 모드. 테이블:
-- `users`, `sessions`, `messages`, `token_transactions`, `model_settings`, `site_settings`, `monthly_credit_refills`, `payments`
+- `users`(`credits` 총 잔액 + `paid_credits` 구매분), `sessions`, `messages`, `token_transactions`,
+  `model_settings`, `site_settings`, `monthly_credit_refills`, `payments`
 - 스키마 마이그레이션은 `init_db()`에서 `ALTER TABLE ... ADD COLUMN`을 try/except로 처리
 
 ### Initialization

@@ -159,6 +159,15 @@ def init_db() -> None:
     )
     conn.commit()
 
+    # 구매한 이용권은 월 충전의 바닥값에 잡히면 안 된다.  `credits` 는 계속
+    # "총 잔액"이고, 그중 구매분이 얼마인지만 여기에 따로 적는다 — 잔액을 읽는
+    # 코드는 전부 그대로 두고 충전 기준만 무료분으로 바꾸기 위해서다.
+    # 불변식: 0 <= paid_credits <= credits.  무료분 = credits - paid_credits.
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN paid_credits INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
     # New accounts must record the privacy notice accepted after Google OAuth.
     # Existing accounts predate this signup flow and intentionally remain NULL.
     for column, definition in (
@@ -383,17 +392,22 @@ def _refill_users_to_floor(
     transaction_type: str,
     memo: str,
 ) -> tuple[int, int]:
-    """Raise balances below *target* using the caller's open transaction."""
+    """Raise the *free* portion of each balance to *target*.
+
+    Purchased credits are excluded from the comparison and from the result.
+    Buying used to push the total past the floor and silently cancel the next
+    month's grant — paying must not cost a user their free allowance.
+    """
     rows = conn.execute(
-        "SELECT id, credits FROM users WHERE credits < ? ORDER BY id",
+        "SELECT id, credits, paid_credits FROM users WHERE credits - paid_credits < ? ORDER BY id",
         (target,),
     ).fetchall()
     total_credits = 0
     for row in rows:
-        amount = target - row["credits"]
+        amount = target - (row["credits"] - row["paid_credits"])
         conn.execute(
-            "UPDATE users SET credits = ?, updated_at = datetime('now') WHERE id = ?",
-            (target, row["id"]),
+            "UPDATE users SET credits = credits + ?, updated_at = datetime('now') WHERE id = ?",
+            (amount, row["id"]),
         )
         conn.execute(
             "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
@@ -687,13 +701,23 @@ def delete_user_account(user_id: int) -> str:
 
 
 def deduct_credit(user_id: int, amount: int = 1, memo: str = "질문") -> bool:
-    """Atomically deduct *amount* credits. Returns True if successful."""
+    """Atomically deduct *amount* credits, spending the free portion first.
+
+    Free credits come back every month and purchased ones never expire, so
+    spending free first is what keeps a purchase from evaporating. SQLite
+    evaluates every SET expression against the pre-update row, so the free
+    portion below is the one that existed before this statement.
+    """
     if is_unlimited_credits():
         return True
     conn = _get_conn()
     cur = conn.execute(
-        "UPDATE users SET credits = credits - ?, updated_at = datetime('now') WHERE id = ? AND credits >= ?",
-        (amount, user_id, amount),
+        """UPDATE users
+              SET credits = credits - ?,
+                  paid_credits = MAX(0, paid_credits - MAX(0, ? - (credits - paid_credits))),
+                  updated_at = datetime('now')
+            WHERE id = ? AND credits >= ?""",
+        (amount, amount, user_id, amount),
     )
     if cur.rowcount > 0:
         conn.execute(
@@ -707,7 +731,14 @@ def deduct_credit(user_id: int, amount: int = 1, memo: str = "질문") -> bool:
 
 
 def refund_credit(user_id: int, amount: int = 1, memo: str = "환불") -> None:
-    """Refund credits back to a user (e.g. on LLM error)."""
+    """Refund credits back to a user (e.g. on LLM error).
+
+    The refund lands in the free portion. Which bucket the failed question
+    actually drew from is not tracked per transaction, and compensation for a
+    fault on our side belongs in the free bucket rather than being counted as
+    something the user bought. The asymmetry favours the user, which is the
+    right direction for an error we caused.
+    """
     if is_unlimited_credits():
         return
     conn = _get_conn()
@@ -1353,9 +1384,12 @@ def admin_set_credits(user_id: int, credits: int, memo: str = "관리자 조정"
         conn.close()
         return credits
 
+    # 총 잔액을 맞추되 paid_credits <= credits 를 깨지 않는다.
     conn.execute(
-        "UPDATE users SET credits = ?, updated_at = datetime('now') WHERE id = ?",
-        (credits, user_id),
+        """UPDATE users
+              SET credits = ?, paid_credits = MIN(paid_credits, ?), updated_at = datetime('now')
+            WHERE id = ?""",
+        (credits, credits, user_id),
     )
     conn.execute(
         "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
@@ -1376,8 +1410,10 @@ def admin_bulk_set_credits(credits: int, memo: str = "관리자 일괄 조정") 
         if delta == 0:
             continue
         conn.execute(
-            "UPDATE users SET credits = ?, updated_at = datetime('now') WHERE id = ?",
-            (credits, r["id"]),
+            """UPDATE users
+                  SET credits = ?, paid_credits = MIN(paid_credits, ?), updated_at = datetime('now')
+                WHERE id = ?""",
+            (credits, credits, r["id"]),
         )
         conn.execute(
             "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
