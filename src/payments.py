@@ -18,6 +18,7 @@ import hmac
 import json
 import logging
 import os
+import time
 import uuid
 
 import httpx
@@ -40,6 +41,15 @@ DEFAULT_API_BASE = "https://api.nicepay.co.kr"
 # 승인 API는 카드사 응답을 기다리므로 read timeout을 길게 잡는다. 그래도 끊기면
 # 승인 성립 여부를 알 수 없는 상태라 망취소를 던져야 한다.
 _TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=5.0, pool=5.0)
+
+# 액세스 토큰 유효시간 30분. 만료 직전에 걸리지 않도록 여유를 두고 갱신한다.
+# expireAt을 파싱하지 않는 이유는 시계 오차와 오프셋 표기(+0900, 콜론 없음)에
+# 기대지 않기 위해서다 — 어긋나도 U103 재시도가 받아준다.
+_TOKEN_TTL = 30 * 60
+_TOKEN_MARGIN = 120
+
+# 인증타입 불일치. Basic으로 결제 API를 부르면 이 코드가 온다.
+_WRONG_AUTH_TYPE = "U103"
 
 _PAID = "paid"
 
@@ -149,18 +159,67 @@ def _basic_auth_header() -> str:
 
 # ---------------------------------------------------------------------------
 # 나이스페이 API
+#
+# 결제 API(/v1/payments/*)는 Bearer 토큰만 받는다. Basic을 보내면 조회조차
+# U103 "사용자 인증타입이 맞지 않습니다"로 거절된다. Basic이 통하는 곳은 토큰을
+# 발급하는 /v1/access-token 하나뿐이다.
 # ---------------------------------------------------------------------------
-async def _post(path: str, body: dict) -> dict:
+_token: dict = {"value": None, "expires_at": 0.0}
+
+
+def reset_access_token() -> None:
+    _token["value"] = None
+    _token["expires_at"] = 0.0
+
+
+async def _request(method: str, path: str, body: dict | None, authorization: str) -> dict:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        response = await client.post(
+        response = await client.request(
+            method,
             f"{api_base()}{path}",
             json=body,
             headers={
-                "Authorization": _basic_auth_header(),
+                "Authorization": authorization,
                 "Content-Type": "application/json; charset=utf-8",
             },
         )
     return response.json()
+
+
+async def access_token() -> str:
+    """Bearer 토큰을 캐시해서 돌려준다. 발급 실패는 예외로 올린다 — 토큰이 없으면
+    승인을 시도조차 할 수 없고, 부르는 쪽이 그걸 승인 실패로 다뤄야 한다.
+
+    락은 두지 않는다. 단일 레플리카에 저트래픽이라 경합해도 토큰이 하나 더
+    발급될 뿐이고, 먼저 받은 토큰도 만료까지 그대로 유효하다.
+    """
+    now = time.monotonic()
+    if _token["value"] and now < _token["expires_at"]:
+        return _token["value"]
+
+    body = await _request("POST", "/v1/access-token", {}, _basic_auth_header())
+    if body.get("resultCode") != "0000" or not body.get("accessToken"):
+        raise RuntimeError(
+            f"access token 발급 실패: {body.get('resultCode')} {body.get('resultMsg')}"
+        )
+
+    _token["value"] = body["accessToken"]
+    _token["expires_at"] = now + _TOKEN_TTL - _TOKEN_MARGIN
+    return _token["value"]
+
+
+async def _post(path: str, body: dict) -> dict:
+    """토큰이 만료돼 U103이 오면 한 번 재발급해 재시도한다.
+
+    U103은 인증 계층에서 잘린 것이므로 요청이 처리된 흔적이 없다. 그래서 승인
+    요청이라도 재시도가 안전하다. 다른 오류코드는 절대 재시도하지 않는다.
+    """
+    result = await _request("POST", path, body, f"Bearer {await access_token()}")
+    if result.get("resultCode") == _WRONG_AUTH_TYPE:
+        logger.warning("Access token rejected (U103); reissuing and retrying %s", path)
+        reset_access_token()
+        result = await _request("POST", path, body, f"Bearer {await access_token()}")
+    return result
 
 
 async def approve(tid: str, amount: int) -> dict:
@@ -244,16 +303,27 @@ def list_orders(user_id: int | None = None, limit: int = 50) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def fail_order(order_id: str, reason: str, raw: dict | None = None) -> None:
-    """pending 주문만 실패로 내린다. 이미 승인된 주문은 건드리지 않는다."""
+def fail_order(
+    order_id: str,
+    reason: str,
+    raw_auth: dict | None = None,
+    raw_approve: dict | None = None,
+) -> None:
+    """pending 주문만 실패로 내린다. 이미 승인된 주문은 건드리지 않는다.
+
+    승인이 거절된 경우 그 응답 원문까지 남긴다 — 사유 문구 하나로는 어느 단계에서
+    무엇이 틀렸는지 되짚을 수 없다.
+    """
     conn = _get_conn()
     try:
         conn.execute(
             """UPDATE payments
-                  SET status='failed', fail_reason=?, raw_auth=COALESCE(?, raw_auth),
+                  SET status='failed', fail_reason=?,
+                      raw_auth=COALESCE(?, raw_auth),
+                      raw_approve=COALESCE(?, raw_approve),
                       updated_at=datetime('now')
                 WHERE order_id=? AND status='pending'""",
-            (reason[:500], _dump(raw), order_id),
+            (reason[:500], _dump(raw_auth), _dump(raw_approve), order_id),
         )
         conn.commit()
     finally:
@@ -482,7 +552,12 @@ async def process_return(form: dict) -> tuple[str | None, str]:
             result.get("resultCode"),
             result.get("resultMsg"),
         )
-        fail_order(order_id, result.get("resultMsg") or "결제 승인이 거절되었습니다", form)
+        fail_order(
+            order_id,
+            result.get("resultMsg") or "결제 승인이 거절되었습니다",
+            form,
+            result,
+        )
         return order_id, "failed"
 
     # 응답에 서명이 실려 오면 검증한다. 여기서 어긋나면 승인은 이미 성립한
@@ -496,7 +571,7 @@ async def process_return(form: dict) -> tuple[str | None, str]:
             logger.error(
                 "Payment %s approval response signature mismatch; not granting", order_id
             )
-            fail_order(order_id, "승인 응답 서명 검증에 실패했습니다", result)
+            fail_order(order_id, "승인 응답 서명 검증에 실패했습니다", form, result)
             return order_id, "failed"
 
     settle_order(

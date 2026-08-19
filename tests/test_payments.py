@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 
+import httpx
 import pytest
 
 from src import auth, payments
@@ -664,3 +666,168 @@ def test_free_topup_route_is_gone(tmp_path, monkeypatch):
 
     assert asyncio.run(call()).status_code == 404
     assert _credits(user_id) == 0
+
+
+# ---------------------------------------------------------------------------
+# API 인증 (Bearer)
+#
+# 이 상점은 결제 API에 Basic을 받지 않는다 — 조회조차 U103 "사용자 인증타입이
+# 맞지 않습니다"로 거절한다. Basic이 통하는 곳은 /v1/access-token 하나뿐이다.
+# ---------------------------------------------------------------------------
+def _transport(handler):
+    """httpx 요청을 가로채 (method, path, authorization) 을 기록한다."""
+    seen: list[tuple[str, str, str]] = []
+
+    def route(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, request.headers["authorization"]))
+        return handler(request, len(seen))
+
+    return seen, httpx.MockTransport(route)
+
+
+def _install(monkeypatch, transport) -> None:
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(payments.httpx, "AsyncClient", factory)
+
+
+def _token_response() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "resultCode": "0000",
+            "resultMsg": "정상 처리되었습니다.",
+            "accessToken": "tok-1",
+            "tokenType": "Bearer",
+        },
+    )
+
+
+def test_payment_calls_use_a_bearer_token_and_basic_only_issues_it(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    payments.reset_access_token()
+
+    def handler(request, call):
+        if request.url.path == "/v1/access-token":
+            return _token_response()
+        return httpx.Response(200, json={"resultCode": "0000", "status": "paid"})
+
+    seen, transport = _transport(handler)
+    _install(monkeypatch, transport)
+
+    result = asyncio.run(payments.approve("tid-1", 1000))
+
+    assert result["resultCode"] == "0000"
+    assert seen == [
+        ("POST", "/v1/access-token", payments._basic_auth_header()),
+        ("POST", "/v1/payments/tid-1", "Bearer tok-1"),
+    ]
+
+
+def test_the_token_is_reused_across_calls(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    payments.reset_access_token()
+
+    def handler(request, call):
+        if request.url.path == "/v1/access-token":
+            return _token_response()
+        return httpx.Response(200, json={"resultCode": "0000"})
+
+    seen, transport = _transport(handler)
+    _install(monkeypatch, transport)
+
+    asyncio.run(payments.approve("tid-1", 1000))
+    asyncio.run(payments.cancel_payment("tid-1", reason="test", order_id="o1"))
+    asyncio.run(payments.net_cancel("o1"))
+
+    issued = [call for call in seen if call[1] == "/v1/access-token"]
+    assert len(issued) == 1
+    assert [call[1] for call in seen if call[1] != "/v1/access-token"] == [
+        "/v1/payments/tid-1",
+        "/v1/payments/tid-1/cancel",
+        "/v1/payments/netcancel",
+    ]
+
+
+def test_an_expired_token_is_reissued_once_and_the_call_retried(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    payments.reset_access_token()
+
+    def handler(request, call):
+        if request.url.path == "/v1/access-token":
+            return _token_response()
+        # 첫 결제 호출은 만료된 토큰으로 잘리고, 재발급 후에는 통과한다.
+        if request.headers["authorization"] == "Bearer tok-1" and call == 2:
+            return httpx.Response(
+                200,
+                json={"resultCode": "U103", "resultMsg": "사용자 인증타입이 맞지 않습니다."},
+            )
+        return httpx.Response(200, json={"resultCode": "0000", "status": "paid"})
+
+    seen, transport = _transport(handler)
+    _install(monkeypatch, transport)
+
+    result = asyncio.run(payments.approve("tid-1", 1000))
+
+    assert result["resultCode"] == "0000"
+    assert [call[1] for call in seen] == [
+        "/v1/access-token",
+        "/v1/payments/tid-1",
+        "/v1/access-token",
+        "/v1/payments/tid-1",
+    ]
+
+
+def test_other_error_codes_are_never_retried(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    payments.reset_access_token()
+
+    def handler(request, call):
+        if request.url.path == "/v1/access-token":
+            return _token_response()
+        return httpx.Response(200, json={"resultCode": "3041", "resultMsg": "금액 오류"})
+
+    seen, transport = _transport(handler)
+    _install(monkeypatch, transport)
+
+    result = asyncio.run(payments.approve("tid-1", 1000))
+
+    assert result["resultCode"] == "3041"
+    assert [call[1] for call in seen].count("/v1/payments/tid-1") == 1
+
+
+def test_a_failed_token_issue_surfaces_as_an_error(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    payments.reset_access_token()
+
+    def handler(request, call):
+        return httpx.Response(
+            200, json={"resultCode": "U116", "resultMsg": "사용자 정보가 존재하지 않습니다."}
+        )
+
+    _seen, transport = _transport(handler)
+    _install(monkeypatch, transport)
+
+    with pytest.raises(RuntimeError, match="U116"):
+        asyncio.run(payments.access_token())
+
+
+def test_a_rejected_approval_keeps_the_response_for_diagnosis(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    user_id = _add_user()
+    order = payments.create_order(user_id, "buyer@example.com", 10)
+    rejection = {"resultCode": "U103", "resultMsg": "사용자 인증타입이 맞지 않습니다."}
+    _stub_approve(monkeypatch, rejection)
+
+    order_id, result = asyncio.run(payments.process_return(_return_form(order)))
+
+    assert result == "failed"
+    stored = payments.get_order(order_id)
+    assert stored["fail_reason"] == "사용자 인증타입이 맞지 않습니다."
+    # 사유 문구만 남으면 어느 단계에서 무엇이 틀렸는지 되짚을 수 없다.
+    assert json.loads(stored["raw_approve"]) == rejection
+    assert json.loads(stored["raw_auth"])["authResultCode"] == "0000"
