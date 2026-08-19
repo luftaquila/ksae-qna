@@ -53,6 +53,15 @@ _WRONG_AUTH_TYPE = "U103"
 
 _PAID = "paid"
 
+# 결제창을 열었다 닫기만 해도 주문 행은 pending으로 남는다. 그대로 두면
+# "pending으로 오래 남은 건 = 지급 누락"이라는 운영 신호가 버려진 주문에 묻힌다.
+#
+# 만료는 정리용 라벨일 뿐 승인 게이트가 아니다. 만료 직후에 결제가 완료되면 승인은
+# 그대로 성립하므로, 지급과 실패 기록은 expired 상태에서도 통과시켜야 한다 —
+# 안 그러면 청구는 됐는데 이용권이 없는 주문이 생긴다.
+_GRANTABLE = ("pending", "expired")
+_EXPIRY_MINUTES = 60
+
 # 사업자 정보 · 약관 설정 키. 값은 관리자 화면에서 채운다.
 BUSINESS_SETTING_KEYS = (
     "biz_name",
@@ -303,13 +312,30 @@ def list_orders(user_id: int | None = None, limit: int = 50) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def expire_stale_orders(older_than_minutes: int = _EXPIRY_MINUTES) -> int:
+    """오래 방치된 pending 주문을 expired로 내린다. 정리한 건수를 돌려준다."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            """UPDATE payments
+                  SET status='expired', updated_at=datetime('now')
+                WHERE status='pending'
+                  AND created_at < datetime('now', ?)""",
+            (f"-{int(older_than_minutes)} minutes",),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def fail_order(
     order_id: str,
     reason: str,
     raw_auth: dict | None = None,
     raw_approve: dict | None = None,
 ) -> None:
-    """pending 주문만 실패로 내린다. 이미 승인된 주문은 건드리지 않는다.
+    """아직 승인되지 않은 주문만 실패로 내린다. 이미 승인된 주문은 건드리지 않는다.
 
     승인이 거절된 경우 그 응답 원문까지 남긴다 — 사유 문구 하나로는 어느 단계에서
     무엇이 틀렸는지 되짚을 수 없다.
@@ -322,8 +348,8 @@ def fail_order(
                       raw_auth=COALESCE(?, raw_auth),
                       raw_approve=COALESCE(?, raw_approve),
                       updated_at=datetime('now')
-                WHERE order_id=? AND status='pending'""",
-            (reason[:500], _dump(raw_auth), _dump(raw_approve), order_id),
+                WHERE order_id=? AND status IN (?, ?)""",
+            (reason[:500], _dump(raw_auth), _dump(raw_approve), order_id, *_GRANTABLE),
         )
         conn.commit()
     finally:
@@ -347,7 +373,8 @@ def settle_order(
     """승인된 주문을 확정하고 이용권을 지급한다.
 
     지급이 실제로 일어났을 때만 주문 dict를 돌려준다. 이미 처리된 주문(returnUrl과
-    웹훅이 겹친 경우)이면 None이다.
+    웹훅이 겹친 경우)이면 None이다. 만료로 표시된 주문도 지급 대상이다 — 만료는
+    정리용 라벨이지 승인 게이트가 아니다.
 
     auth.add_credits()를 쓰지 않는 이유는 상태 전이와 잔액 증가가 같은 트랜잭션
     안에 있어야 하기 때문이다. 별도 커넥션으로 나가면 그 사이에 다른 경로가
@@ -368,8 +395,8 @@ def settle_order(
                   SET status='paid', tid=?, method=?, raw_approve=?,
                       raw_auth=COALESCE(?, raw_auth),
                       approved_at=datetime('now'), updated_at=datetime('now')
-                WHERE order_id=? AND status='pending'""",
-            (tid, method, _dump(raw_approve), _dump(raw_auth), order_id),
+                WHERE order_id=? AND status IN (?, ?)""",
+            (tid, method, _dump(raw_approve), _dump(raw_auth), order_id, *_GRANTABLE),
         )
         if cur.rowcount == 0:
             conn.rollback()

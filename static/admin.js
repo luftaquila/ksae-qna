@@ -816,6 +816,7 @@ const PAYMENT_STATUS_LABEL = {
   paid: "완료",
   failed: "실패",
   cancelled: "취소",
+  expired: "미완료",
 };
 
 function collectBusinessFields() {

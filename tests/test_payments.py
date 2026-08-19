@@ -944,3 +944,94 @@ def test_an_admin_absolute_adjustment_keeps_the_invariant(tmp_path, monkeypatch)
     # 올릴 때는 무료분만 늘어난다.
     auth.admin_set_credits(user_id, 9)
     assert _balance(user_id) == (9, 4)
+
+
+# ---------------------------------------------------------------------------
+# 버려진 주문 정리
+#
+# 결제창을 열었다 닫기만 해도 주문 행은 pending으로 남는다. 그대로 두면
+# "pending으로 오래 남은 건 = 지급 누락"이라는 운영 신호가 버려진 주문에 묻힌다.
+# ---------------------------------------------------------------------------
+def _age_order(order_id: str, minutes: int) -> None:
+    conn = auth._get_conn()
+    conn.execute(
+        "UPDATE payments SET created_at = datetime('now', ?) WHERE order_id = ?",
+        (f"-{minutes} minutes", order_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_only_orders_past_the_window_expire(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    user_id = _add_user()
+    stale = payments.create_order(user_id, "buyer@example.com", 10)["order_id"]
+    fresh = payments.create_order(user_id, "buyer@example.com", 10)["order_id"]
+    _age_order(stale, 61)
+
+    assert payments.expire_stale_orders() == 1
+
+    assert payments.get_order(stale)["status"] == "expired"
+    assert payments.get_order(fresh)["status"] == "pending"
+    # 두 번 돌려도 같은 건을 다시 세지 않는다.
+    assert payments.expire_stale_orders() == 0
+
+
+def test_expiry_never_touches_a_settled_or_cancelled_order(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    user_id = _add_user()
+    paid = _settle(monkeypatch, user_id)["order_id"]
+    _age_order(paid, 500)
+
+    assert payments.expire_stale_orders() == 0
+    assert payments.get_order(paid)["status"] == "paid"
+
+
+# 만료를 승인 게이트로 만들면 청구는 됐는데 이용권이 없는 주문이 생긴다.
+def test_an_expired_order_can_still_be_settled(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    user_id = _add_user()
+    order = payments.create_order(user_id, "buyer@example.com", 10)
+    _age_order(order["order_id"], 61)
+    payments.expire_stale_orders()
+    assert payments.get_order(order["order_id"])["status"] == "expired"
+
+    _stub_approve(monkeypatch, _approved(order))
+    _, result = asyncio.run(payments.process_return(_return_form(order)))
+
+    assert result == "paid"
+    assert _credits(user_id) == 10
+    assert payments.get_order(order["order_id"])["status"] == "paid"
+
+
+def test_an_expired_order_can_still_record_a_failure(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    user_id = _add_user()
+    order = payments.create_order(user_id, "buyer@example.com", 10)
+    _age_order(order["order_id"], 61)
+    payments.expire_stale_orders()
+
+    form = _return_form(order)
+    form["authResultCode"] = "1001"
+    form["authResultMsg"] = "사용자가 취소하였습니다"
+    _, result = asyncio.run(payments.process_return(form))
+
+    assert result == "failed"
+    stored = payments.get_order(order["order_id"])
+    assert stored["status"] == "failed"
+    assert stored["fail_reason"] == "사용자가 취소하였습니다"
+
+
+def test_settling_twice_still_grants_once_after_expiry(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    user_id = _add_user()
+    order = payments.create_order(user_id, "buyer@example.com", 10)
+    _age_order(order["order_id"], 61)
+    payments.expire_stale_orders()
+    _stub_approve(monkeypatch, _approved(order))
+
+    asyncio.run(payments.process_return(_return_form(order)))
+    asyncio.run(payments.process_return(_return_form(order)))
+
+    assert _credits(user_id) == 10
+    assert len(auth.get_transactions(user_id)) == 1

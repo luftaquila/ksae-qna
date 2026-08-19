@@ -158,6 +158,14 @@ section 상한이 따로 있는 이유는 지식베이스에서 항목 하나가
 - 지급은 `credits`와 `paid_credits`를 같이 올린다. 취소는 관리자 전액 취소만이고, 회수는
   **남아 있는 구매분 범위에서만** 한다 — 이미 쓴 몫을 무료 충전분에서 빼오면 결제와 무관한
   이용권을 뺏는 셈이다. 실제 회수량은 `payments.reclaimed`에 남는다
+- 결제창을 열었다 닫기만 해도 주문은 `pending`으로 남는다. 시간당 유지보수 워커
+  (`server.py` `_hourly_maintenance_worker`)가 1시간 지난 `pending`을 `expired`로 내린다 —
+  그래야 "`pending`으로 오래 남은 건 = 지급 누락"을 운영 신호로 쓸 수 있다. **만료는 정리용
+  라벨이지 승인 게이트가 아니다**: 지급·실패 기록은 `expired`에서도 통과시켜야 하고
+  (`_GRANTABLE`), 아니면 만료 직후 완료된 결제가 청구만 되고 이용권이 안 들어간다
+- 시각 비교는 SQLite `datetime('now', ...)` 안에서 한다. `created_at`은 `datetime('now')`
+  형식("2026-08-19 11:53:00")이고 JS/Python ISO 문자열은 10번째 글자가 `T`라, 문자열 비교로
+  섞으면 같은 날짜의 모든 행이 컷오프보다 작게 나온다
 - 결제 기록은 탈퇴해도 남는다. `payments.user_id`가 `ON DELETE SET NULL`로 끊겨 익명화되고,
   진행 중인 결제가 있으면 `delete_user_account()`가 `"payment_pending"`으로 탈퇴를 막는다
 - 단가·구매 상한·판매자 정보는 `site_settings`에 있고 `/admin` 설정 탭에서 바꾼다. `/policy`가
