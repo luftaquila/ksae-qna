@@ -151,6 +151,7 @@ function toggleTokenPopover() {
   tokenPopover.innerHTML = `
     <div class="token-popover-header">
       <span>이용권 사용 내역</span>
+      <span class="token-breakdown"></span>
     </div>
     <div class="token-history"><div class="token-history-loading">불러오는 중...</div></div>
     <div class="token-popover-footer">
@@ -162,6 +163,13 @@ function toggleTokenPopover() {
     </div>
   `;
   wrapper.appendChild(tokenPopover);
+
+  // 구매분은 월 충전 대상이 아니라 무료분과 나눠 보여준다.
+  const paid = Number(currentUser?.paid_credits || 0);
+  const breakdown = tokenPopover.querySelector(".token-breakdown");
+  if (breakdown && paid > 0) {
+    breakdown.textContent = `무료 ${Number(currentUser?.credits || 0) - paid}장 · 구매 ${paid}장`;
+  }
 
   loadTransactions();
   renderPurchaseControls();

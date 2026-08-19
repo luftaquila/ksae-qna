@@ -378,6 +378,8 @@ async def me(request: Request):
             "name": user["name"],
             "picture": user["picture"],
             "credits": user["credits"],
+            # 총 잔액 중 구매분. 무료 충전분(credits - paid_credits)과 나눠 보여준다.
+            "paid_credits": user["paid_credits"],
             "is_admin": is_admin(request) is not None,
         },
         "low_credit_threshold": low_threshold,

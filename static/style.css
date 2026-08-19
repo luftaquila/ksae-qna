@@ -507,10 +507,20 @@ header {
 }
 
 .token-popover-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   padding: 13px 14px;
   border-bottom: 1px solid var(--border-color);
   font-size: 14px;
   font-weight: 700;
+}
+
+.token-breakdown {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .token-history {

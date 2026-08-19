@@ -389,9 +389,14 @@ def settle_order(
             )
             return dict(row)
 
+        # 총 잔액과 구매분을 함께 올린다. 구매분은 월 충전 바닥값에서 제외되므로
+        # 이용권을 사도 다음 달 무료 충전이 그대로 들어온다.
         conn.execute(
-            "UPDATE users SET credits = credits + ?, updated_at = datetime('now') WHERE id = ?",
-            (quantity, row["user_id"]),
+            """UPDATE users
+                  SET credits = credits + ?, paid_credits = paid_credits + ?,
+                      updated_at = datetime('now')
+                WHERE id = ?""",
+            (quantity, quantity, row["user_id"]),
         )
         conn.execute(
             "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
@@ -412,9 +417,10 @@ def settle_order(
 def reclaim_order(order_id: str, *, reason: str, raw_cancel: dict | None) -> dict | None:
     """취소된 주문의 이용권을 회수한다. 실제로 회수했을 때만 dict를 돌려준다.
 
-    이미 써버린 이용권까지 뺏어 잔액을 음수로 만들지는 않는다. 음수 잔액은
-    질문을 막을 뿐 아니라 이후 충전분까지 갉아먹기 때문이다. 실제 회수량은
-    payments.reclaimed와 이용 내역 메모에 남는다.
+    회수는 남아 있는 **구매분** 범위에서만 한다. 이미 써버린 몫을 무료 충전분에서
+    빼오면 결제와 무관한 이용권을 뺏는 셈이고, 잔액을 음수로 만들면 질문이 막힐
+    뿐 아니라 이후 충전분까지 갉아먹는다. 실제 회수량은 payments.reclaimed와
+    이용 내역 메모에 남는다.
     """
     conn = _get_conn()
     try:
@@ -441,14 +447,17 @@ def reclaim_order(order_id: str, *, reason: str, raw_cancel: dict | None) -> dic
         reclaimed = 0
         if row["user_id"] is not None and granted > 0:
             balance_row = conn.execute(
-                "SELECT credits FROM users WHERE id = ?", (row["user_id"],)
+                "SELECT paid_credits FROM users WHERE id = ?", (row["user_id"],)
             ).fetchone()
-            balance = int(balance_row["credits"]) if balance_row else 0
-            reclaimed = max(0, min(granted, balance))
+            paid_balance = int(balance_row["paid_credits"]) if balance_row else 0
+            reclaimed = max(0, min(granted, paid_balance))
             if reclaimed:
                 conn.execute(
-                    "UPDATE users SET credits = credits - ?, updated_at = datetime('now') WHERE id = ?",
-                    (reclaimed, row["user_id"]),
+                    """UPDATE users
+                          SET credits = credits - ?, paid_credits = paid_credits - ?,
+                              updated_at = datetime('now')
+                        WHERE id = ?""",
+                    (reclaimed, reclaimed, row["user_id"]),
                 )
                 conn.execute(
                     "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
