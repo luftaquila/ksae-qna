@@ -13,6 +13,7 @@ tqdm==4.70.0
 click==8.4.2
 fastapi==0.141.1
 uvicorn[standard]==0.52.1
+python-multipart==0.0.32      # starlette Request.form() 이 urlencoded 에도 요구한다
 python-dotenv==1.2.2
 google-genai==2.17.0
 authlib==1.7.2

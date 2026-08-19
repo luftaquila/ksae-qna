@@ -587,6 +587,18 @@ header {
   font-weight: 650;
 }
 
+.token-purchase-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.token-purchase-summary {
+  margin-top: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-align: center;
+}
+
 .chat-wrapper {
   position: relative;
   display: flex;

@@ -72,6 +72,9 @@ function activateAdminTab(tabName) {
   document.querySelectorAll(".tab-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === `tab-${tabName}`);
   });
+  if (tabName === "payments") {
+    loadPayments();
+  }
   if (tabName === "conversations" && !convLoaded) {
     convLoaded = true;
     loadSessions("");
@@ -796,6 +799,121 @@ window.toggleModel = async function (modelKey, enabled) {
 };
 
 // ---------------------------------------------------------------------------
+// Payments tab
+// ---------------------------------------------------------------------------
+const BUSINESS_FIELDS = [
+  { key: "biz_name", id: "setting-biz-name" },
+  { key: "biz_owner", id: "setting-biz-owner" },
+  { key: "biz_reg_no", id: "setting-biz-reg-no" },
+  { key: "biz_mail_order_no", id: "setting-biz-mail-order-no" },
+  { key: "biz_address", id: "setting-biz-address" },
+  { key: "biz_tel", id: "setting-biz-tel" },
+  { key: "biz_email", id: "setting-biz-email" },
+];
+
+const PAYMENT_STATUS_LABEL = {
+  pending: "진행 중",
+  paid: "완료",
+  failed: "실패",
+  cancelled: "취소",
+};
+
+function collectBusinessFields() {
+  const business = {};
+  BUSINESS_FIELDS.forEach(({ key, id }) => {
+    business[key] = document.getElementById(id)?.value?.trim() || "";
+  });
+  return business;
+}
+
+// 카드 최소 승인금액 때문에 단가가 낮으면 최소 구매 수량이 올라간다. 관리자가
+// 단가만 보고 "1장부터 팔린다"고 오해하지 않도록 계산해서 같이 보여준다.
+function renderUnitPriceHint() {
+  const hint = document.getElementById("unit-price-hint");
+  const price = parseInt(document.getElementById("setting-credit-unit-price")?.value, 10);
+  if (!hint) return;
+  if (isNaN(price) || price < 1) {
+    hint.textContent = "이용권 1장의 판매 가격(원)";
+    return;
+  }
+  const minQuantity = Math.max(1, Math.ceil(1000 / price));
+  hint.textContent =
+    `이용권 1장 ${price.toLocaleString("ko-KR")}원 · 카드 최소 승인금액 1,000원이라 ${minQuantity}장부터 구매 가능`;
+}
+
+async function loadPayments() {
+  const tbody = document.getElementById("payments-tbody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="7" class="conv-empty">불러오는 중...</td></tr>`;
+
+  let payments = [];
+  try {
+    const res = await fetch("/api/admin/payments");
+    const data = await res.json();
+    payments = data.payments || [];
+  } catch {
+    tbody.innerHTML = `<tr><td colspan="7" class="conv-empty">불러오지 못했습니다</td></tr>`;
+    return;
+  }
+
+  if (!payments.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="conv-empty">결제 내역이 없습니다</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = payments.map((payment) => {
+    const when = formatLocal(payment.approved_at || payment.cancelled_at || payment.created_at);
+    const status = PAYMENT_STATUS_LABEL[payment.status] || payment.status;
+    const note = payment.status === "cancelled" && payment.reclaimed !== null
+      ? ` (${payment.reclaimed}장 회수)`
+      : payment.status === "failed" && payment.fail_reason
+        ? ` · ${payment.fail_reason}`
+        : "";
+    const action = payment.status === "paid"
+      ? `<button class="payment-cancel-btn" data-order="${escapeAttr(payment.order_id)}">취소</button>`
+      : "";
+    return `<tr>
+      <td>${escapeHtml(payment.user_email || "탈퇴한 사용자")}</td>
+      <td>${escapeHtml(payment.goods_name)}</td>
+      <td>${Number(payment.amount).toLocaleString("ko-KR")}원</td>
+      <td>${escapeHtml(status)}${escapeHtml(note)}</td>
+      <td>${escapeHtml(when)}</td>
+      <td class="payment-order-cell">${escapeHtml(payment.order_id)}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join("");
+
+  tbody.querySelectorAll(".payment-cancel-btn").forEach((button) => {
+    button.addEventListener("click", () => cancelPayment(button));
+  });
+}
+
+async function cancelPayment(button) {
+  const orderId = button.dataset.order;
+  const reason = prompt("취소 사유를 입력하세요 (100자 이내)", "관리자 취소");
+  if (reason === null) return;
+  if (!reason.trim()) return;
+  if (!confirm("결제를 전액 취소하고 지급된 이용권을 회수합니다. 계속하시겠습니까?")) return;
+
+  button.disabled = true;
+  try {
+    const res = await fetch(`/api/admin/payments/${encodeURIComponent(orderId)}/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason.trim().slice(0, 100) }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "취소에 실패했습니다");
+    alert(`취소되었습니다. 회수한 이용권 ${data.reclaimed ?? 0}장`);
+    loadPayments();
+    loadUsers();
+  } catch (cause) {
+    alert(cause.message);
+    button.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Settings tab
 // ---------------------------------------------------------------------------
 async function loadSettings() {
@@ -823,6 +941,19 @@ async function loadSettings() {
       unlimitedCheckbox.checked = on;
       if (unlimitedLabel) unlimitedLabel.textContent = on ? "활성" : "비활성";
     }
+    const unitPriceInput = document.getElementById("setting-credit-unit-price");
+    if (unitPriceInput && settings.credit_unit_price !== undefined) {
+      unitPriceInput.value = settings.credit_unit_price;
+    }
+    const maxQuantityInput = document.getElementById("setting-credit-max-quantity");
+    if (maxQuantityInput && settings.credit_max_quantity !== undefined) {
+      maxQuantityInput.value = settings.credit_max_quantity;
+    }
+    BUSINESS_FIELDS.forEach(({ key, id }) => {
+      const field = document.getElementById(id);
+      if (field && settings[key] !== undefined) field.value = settings[key];
+    });
+    renderUnitPriceHint();
   } catch {
     // ignore
   }
@@ -849,6 +980,12 @@ async function doSaveSettings() {
       isNaN(monthlyRefillCredits) || monthlyRefillCredits < 0 ||
       isNaN(threshold) || threshold < 0) return false;
 
+  const unitPriceInput = document.getElementById("setting-credit-unit-price");
+  const maxQuantityInput = document.getElementById("setting-credit-max-quantity");
+  const unitPrice = parseInt(unitPriceInput?.value, 10);
+  const maxQuantity = parseInt(maxQuantityInput?.value, 10);
+  if (isNaN(unitPrice) || unitPrice < 1 || isNaN(maxQuantity) || maxQuantity < 1) return false;
+
   try {
     const res = await fetch("/api/admin/settings", {
       method: "PATCH",
@@ -858,12 +995,16 @@ async function doSaveSettings() {
         monthly_refill_credits: monthlyRefillCredits,
         low_credit_threshold: threshold,
         unlimited_credits: unlimitedCheckbox ? unlimitedCheckbox.checked : false,
+        credit_unit_price: unitPrice,
+        credit_max_quantity: maxQuantity,
+        business: collectBusinessFields(),
       }),
     });
     if (res.ok) {
       const data = await res.json();
       lowCreditThreshold = parseInt(data.settings.low_credit_threshold, 10) || 5;
       renderUsers(userSearch.value);
+      renderUnitPriceHint();
       return true;
     }
   } catch {
@@ -875,6 +1016,11 @@ async function doSaveSettings() {
 document.getElementById("setting-default-credits").addEventListener("change", autoSaveSettings);
 document.getElementById("setting-monthly-refill-credits").addEventListener("change", autoSaveSettings);
 document.getElementById("setting-low-credit-threshold").addEventListener("change", autoSaveSettings);
+document.getElementById("setting-credit-unit-price").addEventListener("change", autoSaveSettings);
+document.getElementById("setting-credit-max-quantity").addEventListener("change", autoSaveSettings);
+BUSINESS_FIELDS.forEach(({ id }) => {
+  document.getElementById(id)?.addEventListener("change", autoSaveSettings);
+});
 
 document.getElementById("setting-unlimited-credits").addEventListener("change", () => {
   const label = document.getElementById("unlimited-label");

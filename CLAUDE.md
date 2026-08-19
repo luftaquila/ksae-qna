@@ -122,10 +122,35 @@ section 상한이 따로 있는 이유는 지식베이스에서 항목 하나가
 - 월 자동 충전은 `monthly_credit_refills`의 월별 PK로 중복 실행을 막고, 관리자는 같은 floor 충전을 즉시 실행 가능
 - 세션 삭제는 soft delete (`deleted_at` 컬럼) — 사용자에게는 숨기고 관리자는 열람 가능
 
+### Payments (NicePay 결제창 서버승인)
+
+`src/payments.py`가 결제의 전부다. UI 용어는 "이용권 구매"이고 상품은 **단가 x 수량** 하나뿐이다.
+
+- 흐름: `POST /api/payments/orders`(서버가 금액 계산, pending 주문 생성) → `AUTHNICE.requestPay()`
+  → `POST /api/payments/return`(브라우저 POST) → 승인 API → 지급 → `/payments/result`로 303
+- **returnUrl 핸들러는 로그인 세션을 읽지 않는다.** 나이스페이 도메인에서 넘어오는 top-level
+  cross-site POST라 `SameSite=Lax`인 `token` 쿠키가 실려 오지 않는다. 소유자는 주문 행의
+  `user_id`로만 판단한다
+- 지급·회수는 `WHERE status = ?` 조건부 UPDATE의 rowcount로 한 번만 통과시키고 잔액 변경을
+  같은 트랜잭션에 넣는다. returnUrl과 웹훅이 겹쳐도 이중 지급이 없다
+- 서명: returnUrl은 `sha256(authToken + clientId + amount + secretKey)`,
+  승인응답·웹훅은 `sha256(tid + amount + ediDate + secretKey)`. 둘 다 `hmac.compare_digest`로 비교
+- 승인 API가 timeout/네트워크 오류로 끊기면 승인 성립 여부를 알 수 없으므로 **망취소**
+  (`/v1/payments/netcancel`, 1시간 이내)를 던지고 주문을 failed로 내린다
+- 웹훅은 본문에 `OK`가 없으면 나이스페이가 실패로 보고 재전송한다. 처리 중 예외는 삼키지 않는다
+- **카드 최소 승인금액은 1,000원**(오류코드 3041)이다. `min_quantity()`가 단가에서 최소 구매
+  수량을 역산하므로, 단가를 낮추면 최소 구매 수량이 자동으로 올라간다
+- 취소는 관리자 전액 취소만이다. 이미 쓴 이용권까지 뺏어 잔액을 음수로 만들지 않고,
+  잔액 범위 내에서만 회수한 뒤 실제 회수량을 `payments.reclaimed`에 남긴다
+- 결제 기록은 탈퇴해도 남는다. `payments.user_id`가 `ON DELETE SET NULL`로 끊겨 익명화되고,
+  진행 중인 결제가 있으면 `delete_user_account()`가 `"payment_pending"`으로 탈퇴를 막는다
+- 단가·구매 상한·판매자 정보는 `site_settings`에 있고 `/admin` 설정 탭에서 바꾼다. `/policy`가
+  그 값을 그대로 렌더한다
+
 ### Database
 
 SQLite (`data/users.db`), WAL 모드. 테이블:
-- `users`, `sessions`, `messages`, `token_transactions`, `model_settings`, `site_settings`, `monthly_credit_refills`
+- `users`, `sessions`, `messages`, `token_transactions`, `model_settings`, `site_settings`, `monthly_credit_refills`, `payments`
 - 스키마 마이그레이션은 `init_db()`에서 `ALTER TABLE ... ADD COLUMN`을 try/except로 처리
 
 ### Initialization
@@ -181,3 +206,8 @@ Incremental 모드는 기존 posts.json과 비교하여 신규만 처리.
 - 크롤러는 KSAE 서버의 약한 DH 키 대응을 위해 `_WeakDHAdapter` (커스텀 SSL `@SECLEVEL=1`) 사용
 - 크롤러 `requests.Session`은 thread-safe하지 않으므로 thread-local 사용
 - 환경 변수: `.env.example` 참조. `GOOGLE_API_KEY` 필수, `ANTHROPIC_API_KEY`는 선택 (없으면 Claude 모델 비활성화)
+- `NICEPAY_SECRET_KEY`는 서버 전용이다. 이 저장소는 public이므로 절대 커밋하지 말 것
+- `python-multipart`는 결제 returnUrl 때문에 필요하다. starlette의 `Request.form()`이
+  content-type 분기보다 먼저 `parse_options_header`를 assert 해서, urlencoded 본문에도 요구한다
+- 무료 충전 라우트 `POST /api/credits/topup`은 유료화하면서 제거했다. 관리자 조정은
+  `/api/admin/users/{id}/credits`와 `/api/admin/credits/bulk`가 담당한다

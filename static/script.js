@@ -14,6 +14,7 @@ let currentUser = null;
 let currentSessionId = null;
 let lowCreditThreshold = 5;
 let unlimitedCredits = false;
+let paymentConfig = null;
 
 const GOOGLE_ICON = `
   <svg class="google-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -154,14 +155,16 @@ function toggleTokenPopover() {
     <div class="token-history"><div class="token-history-loading">불러오는 중...</div></div>
     <div class="token-popover-footer">
       <div class="token-purchase-row">
-        <input type="number" class="token-purchase-input" min="1" max="1000" value="5" placeholder="수량">
-        <button class="token-purchase-btn">구매</button>
+        <input type="number" class="token-purchase-input" step="1" placeholder="수량" disabled>
+        <button class="token-purchase-btn" disabled>구매</button>
       </div>
+      <div class="token-purchase-summary" aria-live="polite">결제 정보를 불러오는 중...</div>
     </div>
   `;
   wrapper.appendChild(tokenPopover);
 
   loadTransactions();
+  renderPurchaseControls();
 
   tokenPopover.querySelector(".token-purchase-btn").addEventListener("click", handleTokenPurchase);
   tokenPopover.querySelector(".token-purchase-input").addEventListener("keydown", (e) => {
@@ -222,8 +225,91 @@ async function loadTransactions() {
   }
 }
 
+async function loadPaymentConfig() {
+  if (paymentConfig) return paymentConfig;
+  try {
+    const res = await fetch("/api/payments/config");
+    const data = await res.json();
+    paymentConfig = data.payment || null;
+  } catch {
+    paymentConfig = null;
+  }
+  return paymentConfig;
+}
+
+// 수량 상·하한과 단가는 서버 설정에서 온다. 금액은 미리보기일 뿐이고, 실제
+// 청구 금액은 주문을 만들 때 서버가 다시 계산한다.
+async function renderPurchaseControls() {
+  const config = await loadPaymentConfig();
+  if (!tokenPopover) return;
+
+  const input = tokenPopover.querySelector(".token-purchase-input");
+  const button = tokenPopover.querySelector(".token-purchase-btn");
+  const summary = tokenPopover.querySelector(".token-purchase-summary");
+  if (!input || !button || !summary) return;
+
+  if (!config || !config.enabled) {
+    summary.textContent = "이용권 구매는 현재 이용할 수 없습니다.";
+    return;
+  }
+
+  input.min = config.min_quantity;
+  input.max = config.max_quantity;
+  input.value = config.min_quantity;
+  input.disabled = false;
+
+  const update = () => {
+    const quantity = Number(input.value);
+    const valid =
+      Number.isInteger(quantity) &&
+      quantity >= config.min_quantity &&
+      quantity <= config.max_quantity;
+    button.disabled = !valid;
+    summary.textContent = valid
+      ? `${quantity}장 · ${(quantity * config.unit_price).toLocaleString("ko-KR")}원`
+      : `${config.min_quantity}~${config.max_quantity}장 사이로 입력하세요`;
+  };
+
+  input.addEventListener("input", update);
+  update();
+}
+
 async function handleTokenPurchase() {
-  alert("이용권 구매 기능은 준비 중입니다.");
+  const input = tokenPopover?.querySelector(".token-purchase-input");
+  const button = tokenPopover?.querySelector(".token-purchase-btn");
+  const summary = tokenPopover?.querySelector(".token-purchase-summary");
+  if (!input || !button || button.disabled) return;
+
+  const quantity = Number(input.value);
+  button.disabled = true;
+
+  try {
+    const res = await fetch("/api/payments/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantity }),
+    });
+    const order = await res.json();
+    if (!res.ok) throw new Error(order.error || "주문을 만들지 못했습니다.");
+    if (typeof AUTHNICE === "undefined") throw new Error("결제 모듈을 불러오지 못했습니다.");
+
+    // 결제창은 새 창이나 리다이렉트로 열린다. 결과 판정은 returnUrl 쪽 서버가 한다.
+    AUTHNICE.requestPay({
+      clientId: order.client_id,
+      method: order.method,
+      orderId: order.order_id,
+      amount: order.amount,
+      goodsName: order.goods_name,
+      returnUrl: order.return_url,
+      buyerName: order.buyer_name,
+      buyerEmail: order.buyer_email,
+    });
+  } catch (cause) {
+    if (summary) summary.textContent = cause.message;
+    else alert(cause.message);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -715,7 +801,7 @@ function showWelcome() {
         </div>
       </div>
       <div class="welcome-warn">LLM은 실수하거나 잘못된 정보를 제공할 수 있으며, AI 답변은 차량검차 시 근거자료로 사용할 수 없습니다.</div>
-      <div class="welcome-contact">문의: <a href="mailto:mail@luftaquila.io">mail@luftaquila.io</a></div>
+      <div class="welcome-contact">문의: <a href="mailto:mail@luftaquila.io">mail@luftaquila.io</a> · <a href="/policy">이용약관 · 환불규정</a></div>
       ${loginHtml}
     </div>
   `;

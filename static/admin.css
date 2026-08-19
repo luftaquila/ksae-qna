@@ -990,3 +990,46 @@
   .credit-cell { gap: 5px; }
   .credit-adjust-btn { padding-right: 7px; padding-left: 7px; }
 }
+
+/* 결제 */
+.settings-business {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  margin-top: 4px;
+}
+
+.settings-business input {
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--border-input);
+  border-radius: 7px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  font-size: 14px;
+}
+
+.settings-business input:focus {
+  border-color: var(--color-primary);
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.payment-order-cell {
+  color: var(--text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.payment-cancel-btn {
+  padding: 6px 11px;
+  border: 1px solid var(--badge-low-color);
+  border-radius: 7px;
+  color: var(--badge-low-color);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.payment-cancel-btn:disabled { cursor: not-allowed; opacity: .45; }

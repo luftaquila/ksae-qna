@@ -50,10 +50,23 @@
       </dl>
     </section>
 
+    <section class="account-card" aria-labelledby="payments-title">
+      <p class="account-eyebrow">이용권 구매</p>
+      <h2 id="payments-title">결제 내역</h2>
+      <p class="account-description">
+        환불은 <a href="/policy">이용약관 · 환불규정</a>을 확인한 뒤 주문번호와 함께 문의해 주세요.
+      </p>
+      <div id="payment-list" class="payment-list" aria-live="polite">
+        <div class="payment-empty">불러오는 중...</div>
+      </div>
+    </section>
+
     <section class="account-card danger-card" aria-labelledby="delete-title">
       <p class="account-eyebrow danger">계정 관리</p>
       <h2 id="delete-title">회원 탈퇴</h2>
-      <p>탈퇴하면 계정, 대화 기록, 이용권 및 이용 내역이 즉시 삭제되며 복구할 수 없습니다.</p>
+      <p>탈퇴하면 계정, 대화 기록, 이용권 및 이용 내역이 즉시 삭제되며 복구할 수 없습니다.
+        결제 기록은 관련 법령에 따라 구매자 정보와 분리된 형태로만 남습니다.
+        진행 중인 결제가 있으면 끝난 뒤에 탈퇴할 수 있습니다.</p>
       <label for="delete-confirmation">계속하려면 <b>회원탈퇴</b>를 입력하세요.</label>
       <input id="delete-confirmation" type="text" autocomplete="off" placeholder="회원탈퇴">
       <p id="account-error" class="account-error" role="alert"></p>
