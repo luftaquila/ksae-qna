@@ -59,6 +59,13 @@ python mcp_server.py
   고정 이용권 비용을 정의한다
 - `MODEL_CONFIG` 딕셔너리는 모델 ID, provider, pricing, thinking level 메타데이터를 보관한다
 - provider별 스트리밍 분리: `_stream_gemini()` (동기 이터레이터를 `run_in_executor`로 래핑), `_stream_anthropic()` (네이티브 async)
+- **모르는 모델을 primary 로 채우지 않는다.** 예전에는 `resolved_model or PRIMARY_MODEL_KEY`
+  라서 오류 턴 전부가 primary 사용 실적으로 집계됐다(오류 21건이 실제로는 Pro 의 429 인데
+  flash 로 기록돼 있었다). 답한 모델이 없으면 `messages.model`·`chat_turns.resolved_model`을
+  **NULL 로 남긴다**
+- 체인을 내려가면 앞 후보의 모델 정보를 비운다 — 그 후보는 이 턴의 답이 아니다. 어디까지
+  내려갔는지는 `chat_turns.attempted_models`(JSON 배열)에 순서대로 남는다. `resolved_model`
+  하나로는 "3.7 이 실패해서 3.6 이 답했다"와 "처음부터 3.6 이었다"를 구분할 수 없다
 - 체인 각 세대의 활성화 여부는 `model_settings` DB 테이블 + `_model_enabled` 인메모리 캐시에
   저장한다. `MODEL_ROUTING_VERSION`을 올리면 다음 기동에서 전 세대를 다시 켜고 마커를 갱신한다
 - 클라이언트의 `/api/chat` 요청에는 모델 필드가 없고, 모델별 이용권 오버라이드나 표시 순서도 제공하지 않는다

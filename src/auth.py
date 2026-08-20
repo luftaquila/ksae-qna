@@ -275,6 +275,13 @@ def init_db() -> None:
     except sqlite3.OperationalError:
         pass
 
+    # 체인을 어디까지 내려갔는지.  resolved_model 하나로는 "3.7 이 실패해서 3.6 이
+    # 답했다"와 "처음부터 3.6 이었다"를 구분할 수 없다.
+    try:
+        conn.execute("ALTER TABLE chat_turns ADD COLUMN attempted_models TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     # Site settings key-value table
     conn.execute(
         """
@@ -1053,6 +1060,7 @@ def complete_chat_turn(
     assistant_message_id: int | None,
     resolved_model: str | None,
     resolved_model_id: str | None,
+    attempted_models: str | None,
     rewritten_query: str | None,
     competition: str | None,
     source_ids: str | None,
@@ -1076,7 +1084,8 @@ def complete_chat_turn(
     conn.execute(
         """
         UPDATE chat_turns SET
-            assistant_message_id = ?, resolved_model = ?, resolved_model_id = ?, rewritten_query = ?,
+            assistant_message_id = ?, resolved_model = ?, resolved_model_id = ?,
+            attempted_models = ?, rewritten_query = ?,
             competition = COALESCE(?, competition), source_ids = ?,
             retrieval_status = ?, status = ?, error_provider = ?,
             error_code = ?, error_message = ?, finish_reason = ?,
@@ -1089,6 +1098,7 @@ def complete_chat_turn(
             assistant_message_id,
             resolved_model,
             resolved_model_id,
+            attempted_models,
             rewritten_query,
             competition,
             source_ids,
