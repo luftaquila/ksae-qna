@@ -51,7 +51,9 @@ async function loadPolicy() {
     : "미등록";
   setText("terms-biz", label);
   setText("privacy-biz", label);
-  setText("privacy-contact", business.biz_email || "미등록");
+  // 보호책임자는 대표자, 연락처는 대표 이메일이다.
+  setText("privacy-officer", business.biz_owner || "미등록");
+  setText("privacy-officer-contact", business.biz_email || "미등록");
 
   const payment = data.payment || {};
   if (payment.unit_price) {
