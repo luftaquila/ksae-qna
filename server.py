@@ -76,7 +76,7 @@ from src.auth import (
 )
 from src.chat import (
     CHAT_CREDIT_COST,
-    FALLBACK_MODEL_KEY,
+    ROUTING_MODEL_KEYS,
     MODEL_CONFIG,
     PRIMARY_MODEL_KEY,
     PROMPT_VERSION,
@@ -619,7 +619,7 @@ async def chat(request: Request, req: ChatRequest):
 
     # Model routing is server-owned: Flash is always attempted first and Pro
     # is the only fallback. Client payloads cannot select or price a model.
-    if not any(is_model_available(key) for key in (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY)):
+    if not any(is_model_available(key) for key in ROUTING_MODEL_KEYS):
         return JSONResponse({"error": "답변 모델을 현재 사용할 수 없습니다."}, status_code=503)
 
     invalid_collections = set()
@@ -689,6 +689,8 @@ async def chat(request: Request, req: ChatRequest):
         thinking_tokens = None
         has_error = False
         has_fallback = False
+        # 체인을 어디까지 내려갔는지.  순서를 지키고 중복은 넣지 않는다.
+        attempted_models: list[str] = []
         model_text_emitted = False
         rewritten_query = None
         resolved_model = None
@@ -775,12 +777,21 @@ async def chat(request: Request, req: ChatRequest):
                 elif event_type == "model" and isinstance(payload, dict):
                     resolved_model = payload.get("resolved_model") or resolved_model
                     resolved_model_id = payload.get("resolved_model_id") or resolved_model_id
+                    if resolved_model and resolved_model not in attempted_models:
+                        attempted_models.append(resolved_model)
                 elif event_type == "fallback" and isinstance(payload, dict):
                     has_fallback = True
                     reason = payload.get("reason") if isinstance(payload.get("reason"), dict) else {}
                     error_provider = str(reason.get("provider") or "model")
                     error_code = str(reason.get("code") or "fallback")
                     error_message = str(reason.get("message") or "primary model failed; fallback used")[:1000]
+                    for key in (payload.get("from"), payload.get("to")):
+                        if key and key not in attempted_models:
+                            attempted_models.append(str(key))
+                    # 내려갔다는 것은 앞 후보가 이 턴의 답이 아니라는 뜻이다.  비워서
+                    # 다음 후보가 채우게 하고, 아무도 답하지 못하면 NULL 로 남는다.
+                    resolved_model = None
+                    resolved_model_id = None
         except Exception as exc:
             logger.exception("LLM streaming error in background task")
             has_error = True
@@ -811,15 +822,22 @@ async def chat(request: Request, req: ChatRequest):
                     input_tokens,
                     output_tokens,
                     thinking_tokens,
-                    model=resolved_model or PRIMARY_MODEL_KEY,
+                    # 모르면 NULL 로 남긴다.  primary 로 채워 넣으면 오류 턴 전부가
+                    # primary 사용 실적으로 집계돼 통계가 거짓이 된다.
+                    model=resolved_model,
                     rewritten_query=rewritten_query,
                     turn_id=turn_id,
                 )
                 complete_chat_turn(
                     turn_id,
                     assistant_message_id=assistant_message["id"],
-                    resolved_model=resolved_model or PRIMARY_MODEL_KEY,
+                    resolved_model=resolved_model,
                     resolved_model_id=resolved_model_id,
+                    attempted_models=(
+                        json.dumps(attempted_models, ensure_ascii=False)
+                        if attempted_models
+                        else None
+                    ),
                     rewritten_query=rewritten_query,
                     competition=competition,
                     source_ids=source_ids_json,
@@ -1037,7 +1055,7 @@ async def admin_turns_list(request: Request, limit: int = 100, status: str | Non
 async def admin_toggle_model(model_key: str, body: ModelToggleRequest, request: Request):
     if not is_admin(request):
         return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
-    if model_key not in (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY):
+    if model_key not in ROUTING_MODEL_KEYS:
         return JSONResponse({"error": "존재하지 않는 모델입니다"}, status_code=404)
     set_model_admin_settings(model_key, body.enabled)
     return {"ok": True, "model_key": model_key, "enabled": body.enabled}

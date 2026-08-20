@@ -1082,6 +1082,10 @@ document.getElementById("bulk-credit-btn").addEventListener("click", async () =>
 // ---------------------------------------------------------------------------
 // Per-model pricing (per 1M tokens)
 const MODEL_PRICING = {
+  "gemini-3.7-flash":  { input: 1.50, output: 7.50,  thinking: 7.50 },
+  "gemini-3.6-flash":  { input: 1.50, output: 7.50,  thinking: 7.50 },
+  "gemini-3.5-flash":  { input: 1.50, output: 7.50,  thinking: 7.50 },
+  // 라우팅에서는 빠졌지만 과거 메시지가 이 키로 저장돼 있다.
   "gemini-3-flash":    { input: 1.50, output: 7.50,  thinking: 7.50 },
   "gemini-3-pro":      { input: 2.50, output: 15.00, thinking: 15.00 },
   "claude-sonnet-4.6": { input: 3.00, output: 15.00, thinking: 15.00 },
@@ -1089,7 +1093,7 @@ const MODEL_PRICING = {
 };
 
 // Default pricing (Gemini Flash) for messages without model info
-const DEFAULT_PRICING = MODEL_PRICING["gemini-3-flash"];
+const DEFAULT_PRICING = MODEL_PRICING["gemini-3.7-flash"];
 
 function estimateCost(inputTokens, outputTokens, thinkingTokens = 0, model = null) {
   const p = (model && MODEL_PRICING[model]) || DEFAULT_PRICING;

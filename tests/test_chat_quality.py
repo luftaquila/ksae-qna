@@ -11,30 +11,35 @@ import pytest
 from src import chat
 
 
-def test_pro_uses_provider_maintained_latest_alias():
-    assert chat.MODEL_CONFIG["gemini-3-pro"]["model_id"] == "gemini-pro-latest"
+# 별칭은 Google 이 옮기면 예고 없이 다른 세대로 갈아탄다. 그래서 버전을 박는다.
+def test_the_chain_pins_versions_instead_of_a_moving_alias():
+    assert chat.MODEL_CHAIN == ("gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash")
+    for key in chat.MODEL_CHAIN:
+        assert chat.MODEL_CONFIG[key]["model_id"] == key
+        assert "latest" not in chat.MODEL_CONFIG[key]["model_id"]
+
+    # Pro 는 이 키에서 무료 티어 한도가 0 이라 라우팅에서 빠졌다.
+    assert "gemini-3-pro" not in chat.ROUTING_MODEL_KEYS
 
 
 def test_chat_routing_and_credit_cost_are_fixed():
-    assert chat.PRIMARY_MODEL_KEY == "gemini-3-flash"
-    assert chat.FALLBACK_MODEL_KEY == "gemini-3-pro"
-    assert chat.UTILITY_MODEL_KEY == "gemini-3-flash"
-    assert chat.MODEL_CONFIG[chat.PRIMARY_MODEL_KEY]["model_id"] == "gemini-flash-latest"
-    assert chat.MODEL_CONFIG[chat.FALLBACK_MODEL_KEY]["model_id"] == "gemini-pro-latest"
-    assert chat.MODEL_CONFIG[chat.PRIMARY_MODEL_KEY]["thinking_level"] == "high"
+    assert chat.PRIMARY_MODEL_KEY == "gemini-3.7-flash"
+    assert chat.UTILITY_MODEL_KEY == "gemini-3.7-flash"
+    assert chat.ROUTING_MODEL_KEYS == chat.MODEL_CHAIN
+    assert all(chat.MODEL_CONFIG[key]["thinking_level"] == "high" for key in chat.MODEL_CHAIN)
     assert chat.CHAT_CREDIT_COST == 1
     assert all(chat.get_effective_credits(key) == 1 for key in chat.ROUTING_MODEL_KEYS)
 
 
-def test_routing_migration_enables_flash_and_pro_once(monkeypatch):
+def test_routing_migration_enables_the_whole_chain_once(monkeypatch):
     model_updates = []
     site_updates = []
     monkeypatch.setattr(
         chat,
         "get_model_settings_map",
         lambda: {
-            chat.PRIMARY_MODEL_KEY: {"enabled": True},
-            chat.FALLBACK_MODEL_KEY: {"enabled": False},
+            chat.MODEL_CHAIN[0]: {"enabled": True},
+            chat.MODEL_CHAIN[1]: {"enabled": False},
         },
     )
     monkeypatch.setattr(chat, "get_site_setting", lambda _key: "")
@@ -51,10 +56,7 @@ def test_routing_migration_enables_flash_and_pro_once(monkeypatch):
 
     chat.init_model_settings()
 
-    assert model_updates == [
-        (chat.PRIMARY_MODEL_KEY, True, None),
-        (chat.FALLBACK_MODEL_KEY, True, None),
-    ]
+    assert model_updates == [(key, True, None) for key in chat.MODEL_CHAIN]
     assert site_updates == [("model_routing_version", chat.MODEL_ROUTING_VERSION)]
     assert all(chat._model_enabled[key] for key in chat.ROUTING_MODEL_KEYS)
 
@@ -64,8 +66,8 @@ def test_completed_routing_migration_preserves_admin_model_toggle(monkeypatch):
         chat,
         "get_model_settings_map",
         lambda: {
-            chat.PRIMARY_MODEL_KEY: {"enabled": True},
-            chat.FALLBACK_MODEL_KEY: {"enabled": False},
+            chat.MODEL_CHAIN[0]: {"enabled": True},
+            chat.MODEL_CHAIN[1]: {"enabled": False},
         },
     )
     monkeypatch.setattr(
@@ -86,8 +88,8 @@ def test_completed_routing_migration_preserves_admin_model_toggle(monkeypatch):
 
     chat.init_model_settings()
 
-    assert chat._model_enabled[chat.PRIMARY_MODEL_KEY] is True
-    assert chat._model_enabled[chat.FALLBACK_MODEL_KEY] is False
+    assert chat._model_enabled[chat.MODEL_CHAIN[0]] is True
+    assert chat._model_enabled[chat.MODEL_CHAIN[1]] is False
 
 
 def test_competition_router_distinguishes_similar_electric_classes():
@@ -552,7 +554,7 @@ def test_aark_search_ignores_legacy_confidence_filter(monkeypatch):
     chat._search_cache.clear()
 
 
-def test_flash_failure_before_first_token_falls_back_to_pro(monkeypatch):
+def test_failure_before_the_first_token_steps_down_one_generation(monkeypatch):
     async def no_rewrite(_query, _history):
         return None
 
@@ -560,19 +562,19 @@ def test_flash_failure_before_first_token_falls_back_to_pro(monkeypatch):
         return sources
 
     async def fake_stream(_contents, model_key, fallback_from=None):
-        if model_key == "gemini-3-flash":
-            yield 'event: model\ndata: {"resolved_model":"gemini-3-flash"}\n\n'
-            error = {"provider": "gemini", "code": "model_not_found", "message": "retired"}
+        if model_key == chat.MODEL_CHAIN[0]:
+            yield f'event: model\ndata: {{"resolved_model":"{model_key}"}}\n\n'
+            error = {"provider": "gemini", "code": "rate_limited", "message": "retry in 47s"}
             yield f"event: error\ndata: {json.dumps(error)}\n\n"
             return
         model = {
             "requested_model": fallback_from,
-            "resolved_model": "gemini-3-pro",
-            "resolved_model_id": "gemini-pro-latest",
+            "resolved_model": model_key,
+            "resolved_model_id": model_key,
         }
         yield f"event: model\ndata: {json.dumps(model)}\n\n"
         yield 'event: token\ndata: "대체 응답"\n\n'
-        yield 'event: usage\ndata: {"resolved_model":"gemini-3-pro"}\n\n'
+        yield f'event: usage\ndata: {{"resolved_model":"{model_key}"}}\n\n'
 
     monkeypatch.setattr(chat, "_rewrite_query", no_rewrite)
     monkeypatch.setattr(chat, "_rerank_results", no_rerank)
@@ -593,7 +595,7 @@ def test_flash_failure_before_first_token_falls_back_to_pro(monkeypatch):
     assert not any(event.startswith("event: error") for event in events)
 
 
-def test_pro_is_used_directly_when_flash_is_unavailable(monkeypatch):
+def test_the_next_generation_is_used_directly_when_the_newest_is_unavailable(monkeypatch):
     async def no_rewrite(_query, _history):
         return None
 
@@ -605,7 +607,7 @@ def test_pro_is_used_directly_when_flash_is_unavailable(monkeypatch):
     async def fake_stream(_contents, model_key, fallback_from=None):
         called.append((model_key, fallback_from))
         yield 'event: token\ndata: "대체 응답"\n\n'
-        yield 'event: usage\ndata: {"resolved_model":"gemini-3-pro"}\n\n'
+        yield f'event: usage\ndata: {{"resolved_model":"{model_key}"}}\n\n'
 
     monkeypatch.setattr(chat, "_rewrite_query", no_rewrite)
     monkeypatch.setattr(chat, "_rerank_results", no_rerank)
@@ -615,12 +617,94 @@ def test_pro_is_used_directly_when_flash_is_unavailable(monkeypatch):
         "search_with_metadata",
         lambda *_args, **_kwargs: ([], {"status": "ok", "failed_collections": {}}),
     )
-    monkeypatch.setattr(chat, "is_model_available", lambda key: key == chat.FALLBACK_MODEL_KEY)
+    monkeypatch.setattr(chat, "is_model_available", lambda key: key == chat.MODEL_CHAIN[1])
 
     async def collect():
         return [event async for event in chat.search_and_stream("질문")]
 
     events = asyncio.run(collect())
-    assert called == [(chat.FALLBACK_MODEL_KEY, chat.PRIMARY_MODEL_KEY)]
+    # 유일한 후보라 fallback_from 은 비어 있다 — 그 자리가 곧 체인의 시작이다.
+    assert called == [(chat.MODEL_CHAIN[1], None)]
     assert any(event.startswith("event: fallback") for event in events)
     assert any("대체 응답" in event for event in events)
+
+
+def _routing_harness(monkeypatch, fake_stream, available=None):
+    """체인 라우팅만 남기고 검색·재작성·리랭크를 걷어낸다."""
+    async def no_rewrite(_query, _history):
+        return None
+
+    async def no_rerank(_query, sources, _limit):
+        return sources
+
+    monkeypatch.setattr(chat, "_rewrite_query", no_rewrite)
+    monkeypatch.setattr(chat, "_rerank_results", no_rerank)
+    monkeypatch.setattr(chat, "_stream_gemini", fake_stream)
+    monkeypatch.setattr(
+        chat,
+        "search_with_metadata",
+        lambda *_args, **_kwargs: ([], {"status": "ok", "failed_collections": {}}),
+    )
+    monkeypatch.setattr(
+        chat,
+        "is_model_available",
+        lambda key: key in (available if available is not None else chat.MODEL_CHAIN),
+    )
+
+    async def collect():
+        return [event async for event in chat.search_and_stream("질문")]
+
+    return asyncio.run(collect())
+
+
+# Pro 로 넘어가던 예전 경로는 무료 티어 한도가 0 이라 한 번도 성공할 수 없었다.
+# 같은 계열에서 한 세대씩 내려가면 앞 세대가 분당 한도에 걸려도 답변이 나간다.
+def test_the_chain_walks_down_one_generation_at_a_time(monkeypatch):
+    called = []
+
+    async def fake_stream(_contents, model_key, fallback_from=None):
+        called.append((model_key, fallback_from))
+        if model_key != chat.MODEL_CHAIN[-1]:
+            yield 'event: error\ndata: {"provider":"gemini","code":"rate_limited"}\n\n'
+            return
+        yield 'event: token\ndata: "마지막 세대 응답"\n\n'
+        yield f'event: usage\ndata: {{"resolved_model":"{chat.MODEL_CHAIN[-1]}"}}\n\n'
+
+    events = _routing_harness(monkeypatch, fake_stream)
+
+    assert [key for key, _ in called] == list(chat.MODEL_CHAIN)
+    # 두 번 내려갔으니 fallback 이벤트도 두 번.
+    assert len([e for e in events if e.startswith("event: fallback")]) == 2
+    # 중간 오류는 사용자에게 나가지 않는다 — 마지막 세대가 답을 냈다.
+    assert not any(e.startswith("event: error") for e in events)
+    assert any("마지막 세대 응답" in e for e in events)
+
+
+def test_the_last_generations_error_reaches_the_user(monkeypatch):
+    called = []
+
+    async def fake_stream(_contents, model_key, fallback_from=None):
+        called.append(model_key)
+        yield 'event: error\ndata: {"provider":"gemini","code":"rate_limited"}\n\n'
+
+    events = _routing_harness(monkeypatch, fake_stream)
+
+    # 전부 시도하고, 마지막 오류는 그대로 전달돼 이용권이 환불된다.
+    assert called == list(chat.MODEL_CHAIN)
+    assert len([e for e in events if e.startswith("event: error")]) == 1
+
+
+# 토큰이 한 번 나간 뒤에는 되돌릴 수 없으니 다음 세대로 내려가지 않는다.
+def test_a_failure_after_the_first_token_is_not_retried(monkeypatch):
+    called = []
+
+    async def fake_stream(_contents, model_key, fallback_from=None):
+        called.append(model_key)
+        yield 'event: token\ndata: "앞부분"\n\n'
+        yield 'event: error\ndata: {"provider":"gemini","code":"provider_error"}\n\n'
+
+    events = _routing_harness(monkeypatch, fake_stream)
+
+    assert called == [chat.MODEL_CHAIN[0]]
+    assert not any(e.startswith("event: fallback") for e in events)
+    assert any(e.startswith("event: error") for e in events)

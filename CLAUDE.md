@@ -43,11 +43,31 @@ python mcp_server.py
 
 ### Model Routing
 
-- 사용자 모델 선택은 없으며 서버가 Gemini Flash (`gemini-flash-latest`)를 먼저 호출하고 실패하면 Gemini Pro (`gemini-pro-latest`)로 폴백한다
-- `src/chat.py`의 `PRIMARY_MODEL_KEY`, `FALLBACK_MODEL_KEY`, `CHAT_CREDIT_COST`가 라우팅과 고정 이용권 비용을 정의한다
+- 사용자 모델 선택은 없다. 서버가 **같은 Flash 계열을 한 세대씩 내려가며** 시도한다:
+  `gemini-3.7-flash` → `gemini-3.6-flash` → `gemini-3.5-flash` (`src/chat.py`의 `MODEL_CHAIN`)
+- **Pro 로 폴백하던 예전 경로가 32% 오류 환불의 원인이었다.** 이 키에서 `gemini-pro-latest`는
+  `gemini-3.1-pro`로 해석되고 무료 티어 한도가 **0**이라(`429 RESOURCE_EXHAUSTED, limit: 0`)
+  한 번도 성공할 수 없었다. Flash 의 일시적인 분당 한도(`Please retry in 47s`)가 확정 실패로
+  바뀌어 이용권 환불만 쌓였다. 라우팅을 바꿀 때는 후보에 **쿼터가 실제로 있는지** 확인할 것 —
+  `is_model_available()`은 클라이언트 존재만 보고 쿼터는 보지 않는다
+- **`-latest` 별칭을 쓰지 않는다.** Google 이 별칭을 옮기면 예고 없이 다른 세대로 갈아탄다.
+  버전을 박고 올릴 때 의도적으로 올린다
+- 토큰이 한 번이라도 나간 뒤의 실패는 다음 세대로 내려가지 않는다(되돌릴 수 없다).
+  내려갈 때 버려지는 앞 세대 오류는 `logger.warning`으로 남긴다 — 예전에는 이게 사라져서
+  턴 기록에 "모델 flash / 오류 pro" 같은 모순이 남았다
+- `PRIMARY_MODEL_KEY`(= `MODEL_CHAIN[0]`), `ROUTING_MODEL_KEYS`, `CHAT_CREDIT_COST`가 라우팅과
+  고정 이용권 비용을 정의한다
 - `MODEL_CONFIG` 딕셔너리는 모델 ID, provider, pricing, thinking level 메타데이터를 보관한다
 - provider별 스트리밍 분리: `_stream_gemini()` (동기 이터레이터를 `run_in_executor`로 래핑), `_stream_anthropic()` (네이티브 async)
-- 기본/폴백 모델 활성화 여부는 `model_settings` DB 테이블 + `_model_enabled` 인메모리 캐시에 저장한다
+- **모르는 모델을 primary 로 채우지 않는다.** 예전에는 `resolved_model or PRIMARY_MODEL_KEY`
+  라서 오류 턴 전부가 primary 사용 실적으로 집계됐다(오류 21건이 실제로는 Pro 의 429 인데
+  flash 로 기록돼 있었다). 답한 모델이 없으면 `messages.model`·`chat_turns.resolved_model`을
+  **NULL 로 남긴다**
+- 체인을 내려가면 앞 후보의 모델 정보를 비운다 — 그 후보는 이 턴의 답이 아니다. 어디까지
+  내려갔는지는 `chat_turns.attempted_models`(JSON 배열)에 순서대로 남는다. `resolved_model`
+  하나로는 "3.7 이 실패해서 3.6 이 답했다"와 "처음부터 3.6 이었다"를 구분할 수 없다
+- 체인 각 세대의 활성화 여부는 `model_settings` DB 테이블 + `_model_enabled` 인메모리 캐시에
+  저장한다. `MODEL_ROUTING_VERSION`을 올리면 다음 기동에서 전 세대를 다시 켜고 마커를 갱신한다
 - 클라이언트의 `/api/chat` 요청에는 모델 필드가 없고, 모델별 이용권 오버라이드나 표시 순서도 제공하지 않는다
 
 ### Vector Search
