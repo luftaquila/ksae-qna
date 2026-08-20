@@ -779,6 +779,26 @@ function buildWelcomeSourceRows() {
   ).join("");
 }
 
+// 로그인 없이도 판매 조건이 보여야 한다 — 구매 UI 는 이용권 칩 팝오버 안에 있다.
+async function renderWelcomePricing() {
+  const host = document.getElementById("welcome-pricing");
+  if (!host) return;
+  const config = await loadPaymentConfig();
+  if (!host.isConnected) return;
+  if (!config || !config.enabled) {
+    host.textContent = "이용권 구매는 현재 이용할 수 없습니다.";
+    return;
+  }
+  const price = Number(config.unit_price).toLocaleString("ko-KR");
+  const low = config.min_quantity;
+  const amount = (config.unit_price * low).toLocaleString("ko-KR");
+  host.innerHTML =
+    `이용권 <b>1장 ${price}원</b>, 유효기간 없음 · 신용·체크카드 및 간편결제<br>` +
+    `카드사 최소 승인금액이 ${Number(config.min_amount).toLocaleString("ko-KR")}원이라 ` +
+    `${low}장(${amount}원)부터 구매할 수 있습니다. ` +
+    `<a href="/policy">이용약관 및 환불규정</a>`;
+}
+
 function showWelcome() {
   // Don't overwrite if there are actual messages displayed
   if (chat.querySelector(".msg")) {
@@ -810,6 +830,10 @@ function showWelcome() {
           <span>질문 1회당 이용권 1장이 차감됩니다.<br>매월 1일마다 이용권이 무료로 다시 충전됩니다.</span>
         </div>
         <div class="welcome-item">
+          <span class="welcome-icon" aria-hidden="true">&#128179;</span>
+          <span id="welcome-pricing">이용권 판매 정보를 불러오는 중입니다.</span>
+        </div>
+        <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#128218;</span>
           <span>입력창 상단에서 답변에 사용할 데이터를 선택합니다.
             <ul class="welcome-chip-list">${buildWelcomeSourceRows()}</ul>
@@ -821,11 +845,35 @@ function showWelcome() {
       ${loginHtml}
     </div>
   `;
+  renderWelcomePricing();
 }
 
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
+// 전자상거래법 제10조 표시사항. 관리자 설정에 있으므로 정적으로 박지 않는다.
+async function renderSiteFooter() {
+  const host = document.getElementById("footer-business");
+  if (!host) return;
+  try {
+    const res = await fetch("/api/policy");
+    const data = await res.json();
+    const b = data.business || {};
+    const or = (v) => v || "미등록";
+    const email = b.biz_email
+      ? `<a href="mailto:${escapeAttr(b.biz_email)}">${escapeHtml(b.biz_email)}</a>`
+      : "미등록";
+    host.innerHTML = `
+      <div>상호 ${escapeHtml(or(b.biz_name))} · 대표자 ${escapeHtml(or(b.biz_owner))} · 사업자등록번호 ${escapeHtml(or(b.biz_reg_no))}</div>
+      <div>통신판매업신고 ${escapeHtml(or(b.biz_mail_order_no))}</div>
+      <div>주소 ${escapeHtml(or(b.biz_address))}</div>
+      <div>전화 ${escapeHtml(or(b.biz_tel))} · 이메일 ${email}</div>`;
+  } catch {
+    // 하단정보를 못 불러와도 채팅은 막지 않는다.
+  }
+}
+
 initTheme();
 loadCollections().then(() => showWelcome());
 checkAuth();
+renderSiteFooter();
