@@ -851,29 +851,6 @@ function showWelcome() {
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
-// 전자상거래법 제10조 표시사항. 관리자 설정에 있으므로 정적으로 박지 않는다.
-async function renderSiteFooter() {
-  const host = document.getElementById("footer-business");
-  if (!host) return;
-  try {
-    const res = await fetch("/api/policy");
-    const data = await res.json();
-    const b = data.business || {};
-    const or = (v) => v || "미등록";
-    const email = b.biz_email
-      ? `<a href="mailto:${escapeAttr(b.biz_email)}">${escapeHtml(b.biz_email)}</a>`
-      : "미등록";
-    host.innerHTML = `
-      <div>상호 ${escapeHtml(or(b.biz_name))} · 대표자 ${escapeHtml(or(b.biz_owner))} · 사업자등록번호 ${escapeHtml(or(b.biz_reg_no))}</div>
-      <div>통신판매업신고 ${escapeHtml(or(b.biz_mail_order_no))}</div>
-      <div>주소 ${escapeHtml(or(b.biz_address))}</div>
-      <div>전화 ${escapeHtml(or(b.biz_tel))} · 이메일 ${email}</div>`;
-  } catch {
-    // 하단정보를 못 불러와도 채팅은 막지 않는다.
-  }
-}
-
 initTheme();
 loadCollections().then(() => showWelcome());
 checkAuth();
-renderSiteFooter();
