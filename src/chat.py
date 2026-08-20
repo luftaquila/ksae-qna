@@ -49,12 +49,20 @@ _model_enabled: dict[str, bool] = {}
 _model_health: dict[str, dict[str, Any]] = {}
 
 PROMPT_VERSION = "2026-08-quality-v3"
-PRIMARY_MODEL_KEY = "gemini-3-flash"
-FALLBACK_MODEL_KEY = "gemini-3-pro"
-UTILITY_MODEL_KEY = "gemini-3-flash"
-ROUTING_MODEL_KEYS = (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY)
+# 폴백은 같은 Flash 계열에서 한 세대씩 내려간다.  이전에는 Pro 로 넘어갔는데 이 키의
+# Pro 는 무료 티어 한도가 0 이라(429 RESOURCE_EXHAUSTED, limit: 0) 한 번도 성공할 수
+# 없었다 — Flash 의 일시적인 분당 한도가 확정 실패로 바뀌어 이용권 환불만 쌓였다.
+#
+# 별칭(gemini-flash-latest)이 아니라 버전을 박는 것도 같은 이유다.  별칭은 Google 이
+# 옮기면 예고 없이 다른 세대로 갈아타므로, 올릴 때 의도적으로 올린다.
+MODEL_CHAIN = ("gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash")
+PRIMARY_MODEL_KEY = MODEL_CHAIN[0]
+UTILITY_MODEL_KEY = MODEL_CHAIN[0]
+ROUTING_MODEL_KEYS = MODEL_CHAIN
+# 도달할 수 없는 Anthropic 분기만 아직 이 이름을 참조한다.  라우팅은 MODEL_CHAIN 이 한다.
+FALLBACK_MODEL_KEY = MODEL_CHAIN[1]
 CHAT_CREDIT_COST = 1
-MODEL_ROUTING_VERSION = "flash-primary-pro-fallback-v1"
+MODEL_ROUTING_VERSION = "flash-generation-chain-v1"
 
 EMBEDDING_MODEL = "BAAI/bge-m3"
 # 검색 소스 레지스트리 — 컬렉션을 추가할 때 고쳐야 하는 유일한 곳.
@@ -214,25 +222,31 @@ _CACHE_MAX = 100
 MAX_CHUNKS_PER_POST = 2
 
 MODEL_CONFIG = {
-    "gemini-3-flash": {
+    # 세 항목의 pricing 은 Flash 등급 추정치를 공유한다.  비용 표시용 추정이며
+    # 세대별 실단가를 확인하지 않은 값을 넣지는 않는다.
+    "gemini-3.7-flash": {
         "provider": "gemini",
-        # Google-maintained alias. It currently resolves to Gemini 3.7 Flash;
-        # the provider's concrete model_version is persisted with every turn.
-        "model_id": "gemini-flash-latest",
-        "label": "Gemini Flash (Latest)",
+        "model_id": "gemini-3.7-flash",
+        "label": "Gemini 3.7 Flash",
         "credits": 1,
         "thinking_level": "high",
         "pricing": {"input": 1.50, "output": 7.50, "thinking": 7.50},
     },
-    "gemini-3-pro": {
+    "gemini-3.6-flash": {
         "provider": "gemini",
-        # Google-maintained alias: avoids another outage when a dated preview
-        # model is retired.  The resolved version is recorded per turn.
-        "model_id": "gemini-pro-latest",
-        "label": "Gemini Pro (Latest)",
+        "model_id": "gemini-3.6-flash",
+        "label": "Gemini 3.6 Flash",
         "credits": 1,
         "thinking_level": "high",
-        "pricing": {"input": 2.50, "output": 15.00, "thinking": 15.00},
+        "pricing": {"input": 1.50, "output": 7.50, "thinking": 7.50},
+    },
+    "gemini-3.5-flash": {
+        "provider": "gemini",
+        "model_id": "gemini-3.5-flash",
+        "label": "Gemini 3.5 Flash",
+        "credits": 1,
+        "thinking_level": "high",
+        "pricing": {"input": 1.50, "output": 7.50, "thinking": 7.50},
     },
     "claude-sonnet-4.6": {
         "provider": "anthropic",
@@ -427,7 +441,7 @@ def is_model_available(model: str) -> bool:
 
 
 def get_all_models_admin() -> list[dict]:
-    """Return the fixed Flash-primary/Pro-fallback routing configuration."""
+    """Return the fixed Flash generation chain, newest first."""
     result = []
     for model_key in ROUTING_MODEL_KEYS:
         cfg = MODEL_CONFIG[model_key]
@@ -1709,13 +1723,12 @@ async def search_and_stream(
     # Legacy callers may still pass ``confidence``; it is intentionally
     # ignored so AARK retrieval always covers the complete collection.
     del confidence
-    primary_available = is_model_available(PRIMARY_MODEL_KEY)
-    fallback_available = is_model_available(FALLBACK_MODEL_KEY)
-    if not primary_available and not fallback_available:
+    available_chain = [key for key in MODEL_CHAIN if is_model_available(key)]
+    if not available_chain:
         error = {
             "provider": "gemini",
             "code": "model_unavailable",
-            "message": "both primary and fallback models are unavailable",
+            "message": "no model in the fallback chain is available",
             "user_message": "답변 모델을 현재 사용할 수 없습니다. 잠시 후 다시 시도해주세요.",
             "retryable": True,
         }
@@ -1723,10 +1736,10 @@ async def search_and_stream(
         yield "event: done\ndata: {}\n\n"
         return
 
-    model = PRIMARY_MODEL_KEY if primary_available else FALLBACK_MODEL_KEY
+    model = available_chain[0]
     model_config = MODEL_CONFIG[model]
 
-    if model == FALLBACK_MODEL_KEY:
+    if model != PRIMARY_MODEL_KEY:
         reason = {
             "provider": "gemini",
             "code": "primary_unavailable",
@@ -1734,7 +1747,7 @@ async def search_and_stream(
         }
         fallback_event = {
             "from": PRIMARY_MODEL_KEY,
-            "to": FALLBACK_MODEL_KEY,
+            "to": model,
             "reason": reason,
         }
         yield f"event: fallback\ndata: {json.dumps(fallback_event, ensure_ascii=False)}\n\n"
@@ -1852,34 +1865,48 @@ async def search_and_stream(
             contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
         contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
 
-        emitted_text = False
-        should_fallback = False
-        stream_fallback_from = PRIMARY_MODEL_KEY if model == FALLBACK_MODEL_KEY else None
-        async for event in _stream_gemini(contents, model, fallback_from=stream_fallback_from):
-            if event.startswith("event: token"):
-                emitted_text = True
-            if event.startswith("event: error") and not emitted_text:
-                should_fallback = (
-                    model != FALLBACK_MODEL_KEY and is_model_available(FALLBACK_MODEL_KEY)
-                )
-                if should_fallback:
-                    try:
-                        reason = json.loads(event.split("data: ", 1)[1])
-                    except Exception:
-                        reason = {"provider": "gemini", "code": "provider_error"}
-                    fallback_event = {
-                        "from": model,
-                        "to": FALLBACK_MODEL_KEY,
-                        "reason": reason,
-                    }
-                    yield f"event: fallback\ndata: {json.dumps(fallback_event, ensure_ascii=False)}\n\n"
-                    break
-            yield event
+        # 후보를 순서대로 시도한다.  토큰이 한 번이라도 나간 뒤의 실패는 되돌릴 수
+        # 없으니 그때는 내려가지 않고 오류를 그대로 흘린다.  마지막 후보의 오류도
+        # 그대로 나가서 사용자에게 전달되고 이용권이 환불된다.
+        for index, attempt in enumerate(available_chain):
+            has_next = index + 1 < len(available_chain)
+            emitted_text = False
+            failure: str | None = None
 
-        if should_fallback:
-            logger.warning("Falling back from %s to %s", model, FALLBACK_MODEL_KEY)
-            async for event in _stream_gemini(contents, FALLBACK_MODEL_KEY, fallback_from=model):
+            async for event in _stream_gemini(
+                contents,
+                attempt,
+                fallback_from=available_chain[0] if index else None,
+            ):
+                if event.startswith("event: token"):
+                    emitted_text = True
+                if event.startswith("event: error") and not emitted_text and has_next:
+                    failure = event
+                    break
                 yield event
+
+            if failure is None:
+                break
+
+            try:
+                reason = json.loads(failure.split("data: ", 1)[1])
+            except Exception:
+                reason = {"provider": "gemini", "code": "provider_error"}
+            # 여기서 버려지는 오류가 원인 그 자체다.  남기지 않으면 왜 내려갔는지
+            # 알 수 없다 — 예전에는 이 오류가 사라져서 마지막 후보의 오류만 기록됐다.
+            logger.warning(
+                "Falling back from %s to %s: %s %s",
+                attempt,
+                available_chain[index + 1],
+                reason.get("code"),
+                str(reason.get("message"))[:200],
+            )
+            fallback_event = {
+                "from": attempt,
+                "to": available_chain[index + 1],
+                "reason": reason,
+            }
+            yield f"event: fallback\ndata: {json.dumps(fallback_event, ensure_ascii=False)}\n\n"
 
     elif model_config["provider"] == "anthropic":
         if _anthropic is None:

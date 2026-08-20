@@ -76,7 +76,7 @@ from src.auth import (
 )
 from src.chat import (
     CHAT_CREDIT_COST,
-    FALLBACK_MODEL_KEY,
+    ROUTING_MODEL_KEYS,
     MODEL_CONFIG,
     PRIMARY_MODEL_KEY,
     PROMPT_VERSION,
@@ -619,7 +619,7 @@ async def chat(request: Request, req: ChatRequest):
 
     # Model routing is server-owned: Flash is always attempted first and Pro
     # is the only fallback. Client payloads cannot select or price a model.
-    if not any(is_model_available(key) for key in (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY)):
+    if not any(is_model_available(key) for key in ROUTING_MODEL_KEYS):
         return JSONResponse({"error": "답변 모델을 현재 사용할 수 없습니다."}, status_code=503)
 
     invalid_collections = set()
@@ -1037,7 +1037,7 @@ async def admin_turns_list(request: Request, limit: int = 100, status: str | Non
 async def admin_toggle_model(model_key: str, body: ModelToggleRequest, request: Request):
     if not is_admin(request):
         return JSONResponse({"error": "관리자 권한이 필요합니다"}, status_code=403)
-    if model_key not in (PRIMARY_MODEL_KEY, FALLBACK_MODEL_KEY):
+    if model_key not in ROUTING_MODEL_KEYS:
         return JSONResponse({"error": "존재하지 않는 모델입니다"}, status_code=404)
     set_model_admin_settings(model_key, body.enabled)
     return {"ok": True, "model_key": model_key, "enabled": body.enabled}

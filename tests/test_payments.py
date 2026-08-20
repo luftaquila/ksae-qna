@@ -560,7 +560,7 @@ os.environ.setdefault("JWT_SECRET", "test-jwt-secret")
 
 _chat_stub = types.ModuleType("src.chat")
 _chat_stub.CHAT_CREDIT_COST = 1
-_chat_stub.FALLBACK_MODEL_KEY = "fallback"
+_chat_stub.ROUTING_MODEL_KEYS = ("primary", "fallback")
 _chat_stub.MODEL_CONFIG = {}
 _chat_stub.PRIMARY_MODEL_KEY = "primary"
 _chat_stub.PROMPT_VERSION = "test"
