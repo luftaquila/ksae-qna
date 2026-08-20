@@ -45,6 +45,16 @@ async function loadPolicy() {
     }
   }
 
+  // 이용약관과 개인정보처리방침 안에도 상호가 있어야 한다 (심사 요구사항).
+  const label = business.biz_name
+    ? `${business.biz_name}${business.biz_owner ? ` (대표 ${business.biz_owner})` : ""}`
+    : "미등록";
+  setText("terms-biz", label);
+  setText("privacy-biz", label);
+  // 보호책임자는 대표자, 연락처는 대표 이메일이다.
+  setText("privacy-officer", business.biz_owner || "미등록");
+  setText("privacy-officer-contact", business.biz_email || "미등록");
+
   const payment = data.payment || {};
   if (payment.unit_price) {
     setText("product-price", `${Number(payment.unit_price).toLocaleString("ko-KR")}원 / 1장`);
