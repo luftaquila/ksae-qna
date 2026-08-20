@@ -248,6 +248,24 @@ MODEL_CONFIG = {
         "thinking_level": "high",
         "pricing": {"input": 1.50, "output": 7.50, "thinking": 7.50},
     },
+    # 라우팅에서는 빠졌지만 과거 메시지·턴이 이 키로 저장돼 있다.  지우면
+    # server.py 의 비용 집계가 그 행들을 primary 단가로 잘못 계산한다.
+    "gemini-3-flash": {
+        "provider": "gemini",
+        "model_id": "gemini-flash-latest",
+        "label": "Gemini Flash (Latest, 사용 안 함)",
+        "credits": 1,
+        "thinking_level": "high",
+        "pricing": {"input": 1.50, "output": 7.50, "thinking": 7.50},
+    },
+    "gemini-3-pro": {
+        "provider": "gemini",
+        "model_id": "gemini-pro-latest",
+        "label": "Gemini Pro (Latest, 사용 안 함)",
+        "credits": 1,
+        "thinking_level": "high",
+        "pricing": {"input": 2.50, "output": 15.00, "thinking": 15.00},
+    },
     "claude-sonnet-4.6": {
         "provider": "anthropic",
         "model_id": "claude-sonnet-4-6-20250514",

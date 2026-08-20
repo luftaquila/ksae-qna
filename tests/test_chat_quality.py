@@ -554,7 +554,7 @@ def test_aark_search_ignores_legacy_confidence_filter(monkeypatch):
     chat._search_cache.clear()
 
 
-def test_flash_failure_before_first_token_falls_back_to_pro(monkeypatch):
+def test_failure_before_the_first_token_steps_down_one_generation(monkeypatch):
     async def no_rewrite(_query, _history):
         return None
 
@@ -562,19 +562,19 @@ def test_flash_failure_before_first_token_falls_back_to_pro(monkeypatch):
         return sources
 
     async def fake_stream(_contents, model_key, fallback_from=None):
-        if model_key == "gemini-3-flash":
-            yield 'event: model\ndata: {"resolved_model":"gemini-3-flash"}\n\n'
-            error = {"provider": "gemini", "code": "model_not_found", "message": "retired"}
+        if model_key == chat.MODEL_CHAIN[0]:
+            yield f'event: model\ndata: {{"resolved_model":"{model_key}"}}\n\n'
+            error = {"provider": "gemini", "code": "rate_limited", "message": "retry in 47s"}
             yield f"event: error\ndata: {json.dumps(error)}\n\n"
             return
         model = {
             "requested_model": fallback_from,
-            "resolved_model": "gemini-3-pro",
-            "resolved_model_id": "gemini-pro-latest",
+            "resolved_model": model_key,
+            "resolved_model_id": model_key,
         }
         yield f"event: model\ndata: {json.dumps(model)}\n\n"
         yield 'event: token\ndata: "대체 응답"\n\n'
-        yield 'event: usage\ndata: {"resolved_model":"gemini-3-pro"}\n\n'
+        yield f'event: usage\ndata: {{"resolved_model":"{model_key}"}}\n\n'
 
     monkeypatch.setattr(chat, "_rewrite_query", no_rewrite)
     monkeypatch.setattr(chat, "_rerank_results", no_rerank)
@@ -607,7 +607,7 @@ def test_the_next_generation_is_used_directly_when_the_newest_is_unavailable(mon
     async def fake_stream(_contents, model_key, fallback_from=None):
         called.append((model_key, fallback_from))
         yield 'event: token\ndata: "대체 응답"\n\n'
-        yield 'event: usage\ndata: {"resolved_model":"gemini-3-pro"}\n\n'
+        yield f'event: usage\ndata: {{"resolved_model":"{model_key}"}}\n\n'
 
     monkeypatch.setattr(chat, "_rewrite_query", no_rewrite)
     monkeypatch.setattr(chat, "_rerank_results", no_rerank)
