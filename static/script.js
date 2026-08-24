@@ -806,7 +806,8 @@ async function renderWelcomePricing() {
   }
   const price = Number(config.unit_price).toLocaleString("ko-KR");
   host.innerHTML =
-    `이용권 <b>1장 ${price}원</b> (유효기간: 구매일로부터 ${config.validity_days}일)`;
+    `무료 이용권을 모두 소진하면 <b>1장 ${price}원</b>에 추가로 구매할 수 있습니다. ` +
+    `(최소 ${config.min_quantity}장, 유효기간 ${config.validity_days}일)`;
 }
 
 function showWelcome() {
@@ -837,11 +838,7 @@ function showWelcome() {
       <div class="welcome-items">
         <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#9889;</span>
-          <span>질문 1회당 이용권 1장이 차감됩니다.<br>매월 1일마다 이용권이 무료로 다시 충전됩니다.</span>
-        </div>
-        <div class="welcome-item">
-          <span class="welcome-icon" aria-hidden="true">&#128179;</span>
-          <span id="welcome-pricing">이용권 판매 정보를 불러오는 중입니다.</span>
+          <span>질문 1회마다 이용권 1장이 차감되며, 매월 1일마다 기본 제공량이 무료로 다시 충전됩니다.<br><span id="welcome-pricing">이용권 판매 정보를 불러오는 중입니다.</span></span>
         </div>
         <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#128218;</span>
