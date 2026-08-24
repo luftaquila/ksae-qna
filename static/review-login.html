@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex, nofollow">
+  <title>PitBot · 심사용 로그인</title>
+  <script src="/static/bypass.js"></script>
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/account.css">
+  <script>
+    (function() {
+      var t = localStorage.getItem("theme");
+      if (t) document.documentElement.setAttribute("data-theme", t);
+      else if (window.matchMedia("(prefers-color-scheme: dark)").matches)
+        document.documentElement.setAttribute("data-theme", "dark");
+    })();
+  </script>
+</head>
+<body class="account-page">
+  <main class="account-shell">
+    <a href="/" class="account-brand">
+      <img src="/static/logo.svg" alt="" class="header-logo">
+      <span>PitBot</span>
+    </a>
+
+    <section class="account-card" aria-labelledby="review-title">
+      <p class="account-eyebrow">심사용</p>
+      <h1 id="review-title">아이디 로그인</h1>
+      <p class="account-description">
+        결제 심사를 위해 제공되는 로그인 경로입니다. 일반 이용자는
+        <a href="/">첫 화면</a>에서 Google 계정으로 로그인해 주세요.
+      </p>
+
+      <form id="review-form" class="review-form" autocomplete="off">
+        <label for="login-id">아이디</label>
+        <input type="text" id="login-id" name="login_id" required autocapitalize="off" spellcheck="false">
+
+        <label for="login-pw">비밀번호</label>
+        <input type="password" id="login-pw" name="password" required>
+
+        <p id="review-error" class="account-error" role="alert" hidden></p>
+
+        <div class="account-actions">
+          <button type="submit" class="primary-action" id="review-submit">로그인</button>
+        </div>
+      </form>
+    </section>
+  </main>
+  <script src="/static/review-login.js"></script>
+</body>
+</html>

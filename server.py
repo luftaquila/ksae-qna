@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager, suppress
 logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
@@ -34,6 +34,7 @@ from src.auth import (
     apply_monthly_credit_refill,
     get_user_by_id,
     refund_credit,
+    review_login_enabled,
     admin_get_messages,
     admin_set_credits,
     check_db_health,
@@ -43,17 +44,21 @@ from src.auth import (
     create_jwt,
     create_session,
     deduct_credit,
+    expire_credit_lots,
     delete_user_account,
     delete_session,
     get_all_site_settings,
+    get_credit_validity_days,
     get_current_user,
     get_messages,
     get_monthly_refill_credits,
     get_recent_messages,
     get_site_setting,
+    live_credit_lots,
     get_all_users_token_usage_by_model,
     get_admin_overview_stats,
     get_user_token_usage_by_model,
+    get_or_create_review_user,
     get_or_create_user,
     get_user_by_google_id,
     get_session,
@@ -71,6 +76,7 @@ from src.auth import (
     list_sessions,
     oauth,
     set_auth_cookie,
+    verify_review_credentials,
     set_site_setting,
     update_session_title,
 )
@@ -129,6 +135,19 @@ async def _hourly_maintenance_worker() -> None:
             raise
         except Exception:
             logger.exception("Stale payment order cleanup failed")
+
+        try:
+            lapsed = await asyncio.to_thread(expire_credit_lots)
+            if lapsed["credits"]:
+                logger.info(
+                    "Expired %s purchased credits across %s users",
+                    lapsed["credits"],
+                    lapsed["users"],
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Credit expiry sweep failed")
 
         try:
             result = await asyncio.to_thread(apply_monthly_credit_refill)
@@ -225,6 +244,8 @@ class SiteSettingsRequest(BaseModel):
     unlimited_credits: bool = Field(default=False)
     credit_unit_price: int | None = Field(default=None, ge=1, le=1000000)
     credit_max_quantity: int | None = Field(default=None, ge=1, le=100000)
+    # 상한 90일은 나이스페이 입점기준이다. 넘기면 심사에서 판매불가 판정을 받는다.
+    credit_validity_days: int | None = Field(default=None, ge=1, le=90)
     business: dict[str, str] | None = None
 
 
@@ -254,6 +275,57 @@ async def account_page(request: Request):
     if not get_current_user(request):
         return RedirectResponse(url="/", status_code=302)
     return FileResponse("static/account.html")
+
+
+# ---------------------------------------------------------------------------
+# 심사용 로그인
+# ---------------------------------------------------------------------------
+# 나이스페이와 카드사가 "ID/PW, 2차 인증 없음, SNS 불가" 계정을 요구해서 만든
+# 단일 경로다. 자격증명이 배포 환경에 없으면 404 — 평시에는 존재하지 않는다.
+# 시도 제한은 프로세스 안에 둔다. 이 경로에 붙는 계정이 하나뿐이라 계정별
+# 카운터가 필요 없고, 라우트 앞단에 Traefik rate-limit 도 이미 걸려 있다.
+_REVIEW_ATTEMPT_WINDOW = 300
+_REVIEW_ATTEMPT_LIMIT = 10
+_review_attempts: list[float] = []
+
+
+def _review_attempt_allowed() -> bool:
+    now = time.time()
+    _review_attempts[:] = [t for t in _review_attempts if now - t < _REVIEW_ATTEMPT_WINDOW]
+    if len(_review_attempts) >= _REVIEW_ATTEMPT_LIMIT:
+        return False
+    _review_attempts.append(now)
+    return True
+
+
+@app.get("/review-login")
+async def review_login_page():
+    if not review_login_enabled():
+        raise HTTPException(status_code=404)
+    return FileResponse("static/review-login.html")
+
+
+@app.post("/api/review-login")
+async def review_login(request: Request):
+    if not review_login_enabled():
+        raise HTTPException(status_code=404)
+    if not _review_attempt_allowed():
+        raise HTTPException(status_code=429, detail="잠시 후 다시 시도해 주세요.")
+
+    form = await request.form()
+    login_id = str(form.get("login_id") or "")
+    password = str(form.get("password") or "")
+    if not verify_review_credentials(login_id, password):
+        logger.warning("Review login rejected")
+        return JSONResponse(
+            {"error": "아이디 또는 비밀번호가 올바르지 않습니다."}, status_code=401
+        )
+
+    user = get_or_create_review_user()
+    logger.info("Review login accepted for user %s", user["id"])
+    response = JSONResponse({"ok": True})
+    set_auth_cookie(response, create_jwt(user["id"]))
+    return response
 
 
 @app.get("/payments/result")
@@ -548,7 +620,11 @@ async def transactions(request: Request):
     user = get_current_user(request)
     if not user:
         return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
-    return {"transactions": get_transactions(user["id"], public_view=True)}
+    # 구매분은 만료되므로, 잔량만 보여주면 사용자가 언제 사라지는지 알 수 없다.
+    return {
+        "transactions": get_transactions(user["id"], public_view=True),
+        "credit_lots": live_credit_lots(user["id"]),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1081,6 +1157,8 @@ async def admin_update_settings(body: SiteSettingsRequest, request: Request):
         set_site_setting("credit_unit_price", str(body.credit_unit_price))
     if body.credit_max_quantity is not None:
         set_site_setting("credit_max_quantity", str(body.credit_max_quantity))
+    if body.credit_validity_days is not None:
+        set_site_setting("credit_validity_days", str(body.credit_validity_days))
     if body.business is not None:
         for key, value in body.business.items():
             if key in payments.BUSINESS_SETTING_KEYS:

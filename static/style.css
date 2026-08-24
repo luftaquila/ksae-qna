@@ -1162,3 +1162,6 @@ header {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* 만료 안내는 잔량 표시에 딸린 보조 정보라 한 단계 옅게 둔다. */
+.token-expiry { color: var(--text-tertiary); }

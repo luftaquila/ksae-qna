@@ -2,6 +2,8 @@
 Authentication, user DB, and credit system for KSAE Q&A chatbot.
 """
 
+import hmac
+import logging
 import os
 import sqlite3
 import time
@@ -15,6 +17,8 @@ from starlette.responses import Response
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
+
 DB_PATH = os.path.join("data", "users.db")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY = 7 * 24 * 3600  # 7 days
@@ -165,6 +169,27 @@ def init_db() -> None:
         conn.execute("ALTER TABLE users ADD COLUMN deleted_at TEXT")
     except sqlite3.OperationalError:
         pass  # column already exists
+
+    # 구매분은 구매 건별로 만료일이 다르다. 한 계정에 만료일 한 칸을 두면 1월에
+    # 산 20장과 3월에 산 20장 중 하나는 반드시 틀린 날짜를 갖는다. 그래서 구매
+    # 단위로 행을 남긴다. 불변식: users.paid_credits == 미만료 lot 의 remaining 합.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS credit_lots (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL REFERENCES users(id),
+            order_id   TEXT,
+            quantity   INTEGER NOT NULL,
+            remaining  INTEGER NOT NULL,
+            expires_at TEXT    NOT NULL,
+            created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    # 차감·만료 스윕이 둘 다 (user_id, expires_at) 순서로 훑는다.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_credit_lots_live ON credit_lots(user_id, expires_at)"
+    )
 
     # 구매한 이용권은 월 충전의 바닥값에 잡히면 안 된다.  `credits` 는 계속
     # "총 잔액"이고, 그중 구매분이 얼마인지만 여기에 따로 적는다 — 잔액을 읽는
@@ -340,12 +365,14 @@ _SITE_DEFAULTS: dict[str, str] = {
     "monthly_refill_credits": "20",
     "low_credit_threshold": "5",
     "unlimited_credits": "false",
+    # 나이스페이 입점기준: 단건결제 상품의 서비스 제공기간은 3개월을 넘길 수 없다.
+    "credit_validity_days": "90",
     # 결제 (src/payments.py).  단가 x 수량으로 금액을 계산한다.
     "credit_unit_price": "100",
     "credit_max_quantity": "1000",
     # 전자상거래법 제10조·제12조 표시사항.  /policy 가 이 값을 그대로 렌더한다.
     # 관리자 화면에서 덮어쓸 수 있고, 빈 값이면 "미등록"으로 표시된다.
-    "biz_name": "오병준",
+    "biz_name": "하라는코딩은안하고",
     "biz_owner": "오병준",
     "biz_reg_no": "486-21-02172",
     "biz_mail_order_no": "제2025-대전서구-2265호",
@@ -395,6 +422,20 @@ def get_monthly_refill_credits() -> int:
         return max(0, int(get_site_setting("monthly_refill_credits")))
     except (ValueError, TypeError):
         return 20
+
+
+# 상한은 나이스페이 입점기준(3개월)에서 온다. 설정값이 이 상한을 넘으면 심사에
+# 걸리는 상품이 되므로 여기서 잘라낸다.
+MAX_CREDIT_VALIDITY_DAYS = 90
+
+
+def get_credit_validity_days() -> int:
+    """Return how many days a purchased credit stays usable."""
+    try:
+        days = int(get_site_setting("credit_validity_days"))
+    except (ValueError, TypeError):
+        return MAX_CREDIT_VALIDITY_DAYS
+    return max(1, min(MAX_CREDIT_VALIDITY_DAYS, days))
 
 
 KST = timezone(timedelta(hours=9))
@@ -596,6 +637,68 @@ def set_model_order(order: list[str]) -> None:
     conn.close()
 
 
+# ---------------------------------------------------------------------------
+# 심사용 계정
+# ---------------------------------------------------------------------------
+# 나이스페이와 9개 카드사가 심사에 쓸 계정을 요구했고, 조건이 "ID/PW, 2차 인증
+# 없음, SNS 로그인 불가"였다. Google 로그인만 있는 서비스라 이 경로만 예외로
+# 만든다. 자격증명이 환경변수에 없으면 라우트 자체가 없는 것처럼 동작한다.
+REVIEW_GOOGLE_ID = "review-account"
+
+
+def review_login_enabled() -> bool:
+    return bool(os.environ.get("REVIEW_LOGIN_ID") and os.environ.get("REVIEW_LOGIN_PASSWORD"))
+
+
+def verify_review_credentials(login_id: str, password: str) -> bool:
+    """Constant-time check against the configured review credentials."""
+    if not review_login_enabled():
+        return False
+    expected_id = os.environ["REVIEW_LOGIN_ID"]
+    expected_pw = os.environ["REVIEW_LOGIN_PASSWORD"]
+    # 두 비교를 모두 수행해 아이디만 맞았을 때와 둘 다 틀렸을 때의 시간차를 없앤다.
+    id_ok = hmac.compare_digest(login_id.encode(), expected_id.encode())
+    pw_ok = hmac.compare_digest(password.encode(), expected_pw.encode())
+    return id_ok and pw_ok
+
+
+def get_or_create_review_user() -> dict:
+    """The single account the reviewers share. Never an admin."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM users WHERE google_id = ?", (REVIEW_GOOGLE_ID,)
+    ).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE users SET deleted_at=NULL, updated_at=datetime('now') WHERE google_id=?",
+            (REVIEW_GOOGLE_ID,),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM users WHERE google_id = ?", (REVIEW_GOOGLE_ID,)
+        ).fetchone()
+        conn.close()
+        return dict(row)
+
+    conn.execute(
+        """INSERT INTO users (google_id, email, name, picture, credits, privacy_consent_version)
+           VALUES (?, ?, ?, NULL, ?, ?)""",
+        (
+            REVIEW_GOOGLE_ID,
+            "review@nicepay.example",
+            "심사 계정",
+            get_default_credits(),
+            PRIVACY_CONSENT_VERSION,
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM users WHERE google_id = ?", (REVIEW_GOOGLE_ID,)
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
 def get_or_create_user(
     google_id: str,
     email: str,
@@ -741,34 +844,164 @@ def delete_user_account(user_id: int) -> str:
         conn.close()
 
 
+def grant_credit_lot(conn, user_id: int, quantity: int, order_id: str | None) -> str:
+    """Record a purchased batch and return its expiry timestamp.
+
+    Caller owns the transaction and has already raised users.credits and
+    users.paid_credits; this only writes the row that says when the batch dies.
+    """
+    days = get_credit_validity_days()
+    expires_at = conn.execute(
+        "SELECT datetime('now', ?)", (f"+{days} days",)
+    ).fetchone()[0]
+    conn.execute(
+        """INSERT INTO credit_lots (user_id, order_id, quantity, remaining, expires_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (user_id, order_id, quantity, quantity, expires_at),
+    )
+    return expires_at
+
+
+def spend_credit_lots(conn, user_id: int, amount: int) -> int:
+    """Draw *amount* from live lots, soonest expiry first. Returns what was taken.
+
+    Soonest-first is the only order that does not silently destroy value: taking
+    from a later batch would leave an earlier one to expire unused.
+    """
+    if amount <= 0:
+        return 0
+    rows = conn.execute(
+        """SELECT id, remaining FROM credit_lots
+            WHERE user_id = ? AND remaining > 0 AND expires_at > datetime('now')
+            ORDER BY expires_at, id""",
+        (user_id,),
+    ).fetchall()
+    taken = 0
+    for row in rows:
+        if taken >= amount:
+            break
+        take = min(int(row["remaining"]), amount - taken)
+        conn.execute(
+            "UPDATE credit_lots SET remaining = remaining - ? WHERE id = ?",
+            (take, row["id"]),
+        )
+        taken += take
+    return taken
+
+
 def deduct_credit(user_id: int, amount: int = 1, memo: str = "질문") -> bool:
     """Atomically deduct *amount* credits, spending the free portion first.
 
-    Free credits come back every month and purchased ones never expire, so
-    spending free first is what keeps a purchase from evaporating. SQLite
-    evaluates every SET expression against the pre-update row, so the free
-    portion below is the one that existed before this statement.
+    Free credits come back every month, so spending free first is what keeps a
+    purchase from evaporating before its expiry. The paid remainder is drawn
+    from the lot rows as well, because the counter alone cannot say which batch
+    the credit came from and therefore when the rest of it dies.
+
+    Read-then-write instead of one UPDATE: the lot rows have to move by exactly
+    the amount the counter moved, and that number is not known until the free
+    portion is read. BEGIN IMMEDIATE keeps a concurrent question from reading
+    the same balance.
     """
     if is_unlimited_credits():
         return True
     conn = _get_conn()
-    cur = conn.execute(
-        """UPDATE users
-              SET credits = credits - ?,
-                  paid_credits = MAX(0, paid_credits - MAX(0, ? - (credits - paid_credits))),
-                  updated_at = datetime('now')
-            WHERE id = ? AND credits >= ?""",
-        (amount, amount, user_id, amount),
-    )
-    if cur.rowcount > 0:
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT credits, paid_credits FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if row is None or int(row["credits"]) < amount:
+            conn.rollback()
+            return False
+
+        credits = int(row["credits"])
+        paid = int(row["paid_credits"])
+        free = credits - paid
+        from_paid = max(0, amount - free)
+
+        conn.execute(
+            """UPDATE users
+                  SET credits = credits - ?, paid_credits = paid_credits - ?,
+                      updated_at = datetime('now')
+                WHERE id = ?""",
+            (amount, from_paid, user_id),
+        )
+        if from_paid:
+            spend_credit_lots(conn, user_id, from_paid)
         conn.execute(
             "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
             (user_id, -amount, "usage", memo),
         )
-    conn.commit()
-    success = cur.rowcount > 0
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def expire_credit_lots() -> dict:
+    """Destroy lots past their expiry and drop the counters to match.
+
+    Both counters fall by the same amount, so the free portion
+    (credits - paid_credits) is untouched — an expiry must never eat the
+    monthly grant.
+    """
+    conn = _get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            """SELECT user_id, SUM(remaining) AS lost, COUNT(*) AS lots
+                 FROM credit_lots
+                WHERE remaining > 0 AND expires_at <= datetime('now')
+                GROUP BY user_id"""
+        ).fetchall()
+        users = 0
+        credits = 0
+        for row in rows:
+            lost = int(row["lost"] or 0)
+            if lost <= 0:
+                continue
+            conn.execute(
+                """UPDATE users
+                      SET credits = MAX(0, credits - ?),
+                          paid_credits = MAX(0, paid_credits - ?),
+                          updated_at = datetime('now')
+                    WHERE id = ?""",
+                (lost, lost, row["user_id"]),
+            )
+            conn.execute(
+                "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
+                (row["user_id"], -lost, "expire", f"이용권 유효기간 만료 ({lost}장)"),
+            )
+            users += 1
+            credits += lost
+        conn.execute(
+            "UPDATE credit_lots SET remaining = 0 WHERE remaining > 0 AND expires_at <= datetime('now')"
+        )
+        conn.commit()
+        if credits:
+            logger.info("Expired %s purchased credits across %s users", credits, users)
+        return {"users": users, "credits": credits}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def live_credit_lots(user_id: int) -> list[dict]:
+    """Unexpired purchased batches, soonest expiry first (for the UI)."""
+    conn = _get_conn()
+    rows = conn.execute(
+        """SELECT remaining, expires_at FROM credit_lots
+            WHERE user_id = ? AND remaining > 0 AND expires_at > datetime('now')
+            ORDER BY expires_at, id""",
+        (user_id,),
+    ).fetchall()
     conn.close()
-    return success
+    return [{"remaining": int(r["remaining"]), "expires_at": r["expires_at"]} for r in rows]
 
 
 def refund_credit(user_id: int, amount: int = 1, memo: str = "환불") -> None:

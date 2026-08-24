@@ -945,6 +945,10 @@ async function loadSettings() {
     if (maxQuantityInput && settings.credit_max_quantity !== undefined) {
       maxQuantityInput.value = settings.credit_max_quantity;
     }
+    const validityInput = document.getElementById("setting-credit-validity-days");
+    if (validityInput && settings.credit_validity_days !== undefined) {
+      validityInput.value = settings.credit_validity_days;
+    }
     BUSINESS_FIELDS.forEach(({ key, id }) => {
       const field = document.getElementById(id);
       if (field && settings[key] !== undefined) field.value = settings[key];
@@ -978,9 +982,13 @@ async function doSaveSettings() {
 
   const unitPriceInput = document.getElementById("setting-credit-unit-price");
   const maxQuantityInput = document.getElementById("setting-credit-max-quantity");
+  const validityInput = document.getElementById("setting-credit-validity-days");
   const unitPrice = parseInt(unitPriceInput?.value, 10);
   const maxQuantity = parseInt(maxQuantityInput?.value, 10);
+  const validityDays = parseInt(validityInput?.value, 10);
   if (isNaN(unitPrice) || unitPrice < 1 || isNaN(maxQuantity) || maxQuantity < 1) return false;
+  // 90일 상한은 결제 심사 기준이라 서버도 같은 값으로 거부한다.
+  if (isNaN(validityDays) || validityDays < 1 || validityDays > 90) return false;
 
   try {
     const res = await fetch("/api/admin/settings", {
@@ -993,6 +1001,7 @@ async function doSaveSettings() {
         unlimited_credits: unlimitedCheckbox ? unlimitedCheckbox.checked : false,
         credit_unit_price: unitPrice,
         credit_max_quantity: maxQuantity,
+        credit_validity_days: validityDays,
         business: collectBusinessFields(),
       }),
     });
@@ -1014,6 +1023,7 @@ document.getElementById("setting-monthly-refill-credits").addEventListener("chan
 document.getElementById("setting-low-credit-threshold").addEventListener("change", autoSaveSettings);
 document.getElementById("setting-credit-unit-price").addEventListener("change", autoSaveSettings);
 document.getElementById("setting-credit-max-quantity").addEventListener("change", autoSaveSettings);
+document.getElementById("setting-credit-validity-days").addEventListener("change", autoSaveSettings);
 BUSINESS_FIELDS.forEach(({ id }) => {
   document.getElementById(id)?.addEventListener("change", autoSaveSettings);
 });
