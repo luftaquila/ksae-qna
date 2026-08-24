@@ -805,12 +805,8 @@ async function renderWelcomePricing() {
     return;
   }
   const price = Number(config.unit_price).toLocaleString("ko-KR");
-  const low = config.min_quantity;
-  const amount = (config.unit_price * low).toLocaleString("ko-KR");
   host.innerHTML =
-    `이용권 <b>1장 ${price}원</b>, 구매일로부터 ${config.validity_days}일 · 신용·체크카드 및 간편결제<br>` +
-    `카드사 최소 승인금액이 ${Number(config.min_amount).toLocaleString("ko-KR")}원이라 ` +
-    `${low}장(${amount}원)부터 구매할 수 있습니다. ` +
+    `이용권 <b>1장 ${price}원</b>, 구매일로부터 ${config.validity_days}일 ` +
     `<a href="/policy">이용약관 및 환불규정</a>`;
 }
 
