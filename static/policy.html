@@ -44,8 +44,9 @@
       <p class="account-eyebrow">판매 상품</p>
       <h2 id="product-title">이용권</h2>
       <p class="account-description">
-        이용권은 PitBot에 질문할 때 1회당 1장씩 차감되는 선불형 디지털 이용권입니다.
-        유효기간이 없고, 매월 1일 지급되는 무료 이용권과 별도로 관리됩니다.
+        이용권은 PitBot에 질문할 때 1회당 1장씩 차감되는 디지털 이용권입니다.
+        구매일로부터 <b><span id="product-validity">—</span></b> 동안 사용할 수 있고, 기간이 지나면 남은 이용권은 소멸합니다.
+        매월 1일 지급되는 무료 이용권과는 별도로 관리됩니다.
         질문할 때 무료 이용권이 먼저 차감되므로 구매한 이용권은 무료분을 다 쓴 뒤부터 쓰이며,
         구매분이 남아 있어도 무료 이용권은 매월 정상 충전됩니다.
       </p>
@@ -53,6 +54,7 @@
         <dl>
           <div><dt>판매단가</dt><dd id="product-price">—</dd></div>
           <div><dt>구매수량</dt><dd id="product-range">—</dd></div>
+          <div><dt>이용 기간</dt><dd id="product-validity-row">—</dd></div>
           <div><dt>최소 결제금액</dt><dd id="product-min-amount">—</dd></div>
           <div><dt>결제수단</dt><dd>신용·체크카드 및 간편결제</dd></div>
         </dl>
@@ -71,6 +73,7 @@
           <div><dt>전액 환불</dt><dd>결제 후 7일 이내이고, 구매한 이용권을 한 장도 사용하지 않은 경우</dd></div>
           <div><dt>부분 환불</dt><dd>지원하지 않습니다. 일부라도 사용한 구매 건은 환불 대상이 아닙니다.</dd></div>
           <div><dt>처리 기간</dt><dd>요청 확인 후 영업일 기준 3일 이내 취소 요청, 카드사 반영까지 최대 7영업일</dd></div>
+          <div><dt>기간 만료</dt><dd>이용 기간이 지나 소멸한 이용권은 환불 대상이 아닙니다.</dd></div>
           <div><dt>문의</dt><dd id="refund-contact">—</dd></div>
         </dl>
         <p>
@@ -88,6 +91,7 @@
           <div><dt>사업자</dt><dd id="terms-biz">—</dd></div>
           <div><dt>서비스</dt><dd>KSAE 대학생 자작자동차대회 규정·Q&amp;A 검색 및 AI 답변</dd></div>
           <div><dt>계정</dt><dd>Google 계정으로만 가입하며, 계정당 1인이 사용합니다. <b>만 14세 미만은 가입할 수 없습니다.</b></dd></div>
+          <div><dt>이용권 소멸</dt><dd>구매한 이용권은 이용 기간이 지나면 잔량이 소멸하며, 소멸분은 복구되지 않습니다.</dd></div>
           <div><dt>답변의 효력</dt><dd>AI 답변은 참고용이며 차량 검차 시 근거자료로 사용할 수 없습니다.</dd></div>
           <div><dt>이용 제한</dt><dd>자동화된 대량 질의 등 서비스 운영을 방해하는 이용은 제한될 수 있습니다.</dd></div>
           <div><dt>탈퇴</dt><dd>마이페이지에서 즉시 탈퇴할 수 있습니다. 남은 이용권은 소멸되며 환불되지 않습니다.</dd></div>

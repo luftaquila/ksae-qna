@@ -280,3 +280,24 @@
 @media (max-width: 520px) {
   .policy-facts dl div { grid-template-columns: 1fr; }
 }
+
+/* 심사용 로그인 폼. 입력 스타일은 danger-card 와 같은 토큰을 쓴다. */
+.review-form label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.review-form input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid var(--border-input);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.review-form input:focus { border-color: var(--color-primary); outline: none; box-shadow: var(--focus-ring); }

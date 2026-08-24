@@ -196,6 +196,20 @@ function onClickOutsidePopover(e) {
   }
 }
 
+// 구매분은 소멸한다. 잔량만 보여주면 사용자는 언제 사라지는지 알 수 없으므로
+// 가장 먼저 만료되는 구매 건의 날짜를 잔량 옆에 적는다.
+function renderCreditExpiry(lots) {
+  const host = tokenPopover?.querySelector(".token-breakdown");
+  if (!host || !lots.length) return;
+  const soonest = lots[0];
+  const date = formatLocal(soonest.expires_at);
+  const note = document.createElement("span");
+  note.className = "token-expiry";
+  note.textContent = ` · ${soonest.remaining}장 ${date} 만료`;
+  host.appendChild(note);
+}
+
+
 async function loadTransactions() {
   const historyEl = tokenPopover?.querySelector(".token-history");
   if (!historyEl) return;
@@ -204,6 +218,7 @@ async function loadTransactions() {
     const res = await fetch("/api/transactions");
     const data = await res.json();
     const txns = data.transactions || [];
+    renderCreditExpiry(data.credit_lots || []);
 
     if (!txns.length) {
       historyEl.innerHTML = `<div class="token-history-empty">내역이 없습니다</div>`;
@@ -790,12 +805,8 @@ async function renderWelcomePricing() {
     return;
   }
   const price = Number(config.unit_price).toLocaleString("ko-KR");
-  const low = config.min_quantity;
-  const amount = (config.unit_price * low).toLocaleString("ko-KR");
   host.innerHTML =
-    `이용권 <b>1장 ${price}원</b>, 유효기간 없음 · 신용·체크카드 및 간편결제<br>` +
-    `카드사 최소 승인금액이 ${Number(config.min_amount).toLocaleString("ko-KR")}원이라 ` +
-    `${low}장(${amount}원)부터 구매할 수 있습니다. ` +
+    `이용권 <b>1장 ${price}원</b>, 구매일로부터 ${config.validity_days}일 ` +
     `<a href="/policy">이용약관 및 환불규정</a>`;
 }
 

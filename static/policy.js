@@ -63,6 +63,12 @@ async function loadPolicy() {
       "product-min-amount",
       `${Number(payment.min_amount).toLocaleString("ko-KR")}원 (카드사 최소 승인금액)`,
     );
+    // 유효기간은 판매 상품 설명과 판매조건 표 두 곳에서 같은 값을 써야 한다.
+    const days = payment.validity_days;
+    if (days) {
+      setText("product-validity", `${days}일`);
+      setText("product-validity-row", `구매일로부터 ${days}일`);
+    }
   }
 }
 

@@ -161,6 +161,14 @@
             <p class="settings-hint">한 번의 결제로 살 수 있는 이용권 수 상한</p>
           </div>
           <div class="settings-row">
+            <label class="settings-label" for="setting-credit-validity-days">이용권 유효기간</label>
+            <div class="settings-input-group">
+              <input type="number" id="setting-credit-validity-days" min="1" max="90" value="90">
+              <span class="settings-unit">일</span>
+            </div>
+            <p class="settings-hint">구매일로부터 사용 가능한 기간. 결제 심사 기준상 90일을 넘길 수 없습니다.</p>
+          </div>
+          <div class="settings-row">
             <label class="settings-label settings-section-title">판매자 정보 (전자상거래 고지)</label>
             <div class="settings-business">
               <input type="text" id="setting-biz-name" placeholder="상호" maxlength="200">

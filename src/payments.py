@@ -23,7 +23,12 @@ import uuid
 
 import httpx
 
-from src.auth import _get_conn, get_site_setting
+from src.auth import (
+    _get_conn,
+    get_credit_validity_days,
+    get_site_setting,
+    grant_credit_lot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +140,8 @@ def public_config() -> dict:
         "min_quantity": low,
         "max_quantity": max(low, high),
         "min_amount": MIN_CARD_AMOUNT,
+        # 심사에서 지적받은 항목이라 판매 화면과 약관이 같은 값을 봐야 한다.
+        "validity_days": get_credit_validity_days(),
     }
 
 
@@ -429,6 +436,7 @@ def settle_order(
             "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
             (row["user_id"], quantity, "purchase", f"이용권 구매 ({quantity}장)"),
         )
+        grant_credit_lot(conn, row["user_id"], quantity, order_id)
         conn.execute(
             "UPDATE payments SET granted=? WHERE order_id=?", (quantity, order_id)
         )
@@ -439,6 +447,32 @@ def settle_order(
         raise
     finally:
         conn.close()
+
+
+def _reclaim_lots(conn, user_id: int, order_id: str, amount: int) -> None:
+    """Take *amount* back out of the lot rows, this order's batch first.
+
+    The cancelled order's own batch is the honest place to take from. It can be
+    short if the buyer already spent some, so the remainder comes from other
+    live batches, latest expiry first — the mirror of spending, which draws the
+    soonest-expiring first.
+    """
+    remaining = amount
+    rows = conn.execute(
+        """SELECT id, remaining FROM credit_lots
+            WHERE user_id = ? AND remaining > 0
+            ORDER BY (order_id IS NOT ?), expires_at DESC, id DESC""",
+        (user_id, order_id),
+    ).fetchall()
+    for row in rows:
+        if remaining <= 0:
+            break
+        take = min(int(row["remaining"]), remaining)
+        conn.execute(
+            "UPDATE credit_lots SET remaining = remaining - ? WHERE id = ?",
+            (take, row["id"]),
+        )
+        remaining -= take
 
 
 def reclaim_order(order_id: str, *, reason: str, raw_cancel: dict | None) -> dict | None:
@@ -486,6 +520,7 @@ def reclaim_order(order_id: str, *, reason: str, raw_cancel: dict | None) -> dic
                         WHERE id = ?""",
                     (reclaimed, reclaimed, row["user_id"]),
                 )
+                _reclaim_lots(conn, row["user_id"], order_id, reclaimed)
                 conn.execute(
                     "INSERT INTO token_transactions (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
                     (
