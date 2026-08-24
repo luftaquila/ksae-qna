@@ -806,8 +806,7 @@ async function renderWelcomePricing() {
   }
   const price = Number(config.unit_price).toLocaleString("ko-KR");
   host.innerHTML =
-    `이용권 <b>1장 ${price}원</b>, 구매일로부터 ${config.validity_days}일 ` +
-    `<a href="/policy">이용약관 및 환불규정</a>`;
+    `이용권 <b>1장 ${price}원</b> (유효기간: 구매일로부터 ${config.validity_days}일)`;
 }
 
 function showWelcome() {
