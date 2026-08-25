@@ -70,7 +70,7 @@ def test_monthly_refill_only_runs_once_on_first_day(tmp_path, monkeypatch):
         "user_id": low_user,
         "amount": 17,
         "type": "monthly_refill",
-        "memo": "월 기본 이용권 충전 (2026-09)",
+        "memo": "월 기본 제공량 지급 (2026-09)",
     }
     assert len(refill_runs) == 1
 
@@ -108,7 +108,7 @@ def test_admin_can_refill_immediately_without_consuming_monthly_run(tmp_path, mo
         "user_id": low_user,
         "amount": 21,
         "type": "admin_refill",
-        "memo": "관리자 즉시 기본 이용권 충전",
+        "memo": "관리자 즉시 기본 제공량 지급",
     }
     assert refill_count["count"] == 0
 

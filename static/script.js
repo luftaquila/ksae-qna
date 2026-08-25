@@ -150,7 +150,7 @@ function toggleTokenPopover() {
   tokenPopover.className = "token-popover";
   tokenPopover.innerHTML = `
     <div class="token-popover-header">
-      <span>이용권 사용 내역</span>
+      <span>이용권 내역</span>
       <span class="token-breakdown"></span>
     </div>
     <div class="token-history"><div class="token-history-loading">불러오는 중...</div></div>
@@ -164,11 +164,11 @@ function toggleTokenPopover() {
   `;
   wrapper.appendChild(tokenPopover);
 
-  // 구매분은 월 충전 대상이 아니라 무료분과 나눠 보여준다.
+  // 구매분은 월 지급 대상이 아니라 기본 제공량과 나눠 보여준다.
   const paid = Number(currentUser?.paid_credits || 0);
   const breakdown = tokenPopover.querySelector(".token-breakdown");
   if (breakdown && paid > 0) {
-    breakdown.textContent = `무료 ${Number(currentUser?.credits || 0) - paid}장 · 구매 ${paid}장`;
+    breakdown.textContent = `기본 제공 ${Number(currentUser?.credits || 0) - paid}장 · 구매 ${paid}장`;
   }
 
   loadTransactions();
@@ -806,7 +806,7 @@ async function renderWelcomePricing() {
   }
   const price = Number(config.unit_price).toLocaleString("ko-KR");
   host.innerHTML =
-    `무료 이용권을 모두 소진하면 <b>1장 ${price}원</b>에 추가로 구매할 수 있습니다. ` +
+    `기본 제공량을 모두 사용하면 <b>1장 ${price}원</b>에 추가로 구매할 수 있습니다. ` +
     `(최소 ${config.min_quantity}장, 유효기간 ${config.validity_days}일)`;
 }
 
@@ -838,7 +838,7 @@ function showWelcome() {
       <div class="welcome-items">
         <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#9889;</span>
-          <span>질문 1회마다 이용권 1장이 차감되며, 매월 1일마다 기본 제공량이 무료로 다시 충전됩니다.<br><span id="welcome-pricing">이용권 판매 정보를 불러오는 중입니다.</span></span>
+          <span>질문 1회마다 이용권 1장을 사용하며, 매월 1일마다 기본 제공량이 다시 지급됩니다.<br><span id="welcome-pricing">이용권 판매 정보를 불러오는 중입니다.</span></span>
         </div>
         <div class="welcome-item">
           <span class="welcome-icon" aria-hidden="true">&#128218;</span>
