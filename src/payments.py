@@ -423,8 +423,8 @@ def settle_order(
             )
             return dict(row)
 
-        # 총 잔액과 구매분을 함께 올린다. 구매분은 월 충전 바닥값에서 제외되므로
-        # 이용권을 사도 다음 달 무료 충전이 그대로 들어온다.
+        # 총 잔액과 구매분을 함께 올린다. 구매분은 월 지급 바닥값에서 제외되므로
+        # 이용권을 사도 다음 달 기본 제공량이 그대로 들어온다.
         conn.execute(
             """UPDATE users
                   SET credits = credits + ?, paid_credits = paid_credits + ?,
@@ -478,9 +478,9 @@ def _reclaim_lots(conn, user_id: int, order_id: str, amount: int) -> None:
 def reclaim_order(order_id: str, *, reason: str, raw_cancel: dict | None) -> dict | None:
     """취소된 주문의 이용권을 회수한다. 실제로 회수했을 때만 dict를 돌려준다.
 
-    회수는 남아 있는 **구매분** 범위에서만 한다. 이미 써버린 몫을 무료 충전분에서
+    회수는 남아 있는 **구매분** 범위에서만 한다. 이미 써버린 몫을 기본 제공량에서
     빼오면 결제와 무관한 이용권을 뺏는 셈이고, 잔액을 음수로 만들면 질문이 막힐
-    뿐 아니라 이후 충전분까지 갉아먹는다. 실제 회수량은 payments.reclaimed와
+    뿐 아니라 이후 제공량까지 갉아먹는다. 실제 회수량은 payments.reclaimed와
     이용 내역 메모에 남는다.
     """
     conn = _get_conn()

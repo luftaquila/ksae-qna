@@ -186,14 +186,14 @@ def init_db() -> None:
         )
         """
     )
-    # 차감·만료 스윕이 둘 다 (user_id, expires_at) 순서로 훑는다.
+    # 사용·만료 스윕이 둘 다 (user_id, expires_at) 순서로 훑는다.
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_credit_lots_live ON credit_lots(user_id, expires_at)"
     )
 
-    # 구매한 이용권은 월 충전의 바닥값에 잡히면 안 된다.  `credits` 는 계속
+    # 구매한 이용권은 월 지급의 바닥값에 잡히면 안 된다.  `credits` 는 계속
     # "총 잔액"이고, 그중 구매분이 얼마인지만 여기에 따로 적는다 — 잔액을 읽는
-    # 코드는 전부 그대로 두고 충전 기준만 무료분으로 바꾸기 위해서다.
+    # 코드는 전부 그대로 두고 지급 기준만 기본 제공량으로 바꾸기 위해서다.
     # 불변식: 0 <= paid_credits <= credits.  무료분 = credits - paid_credits.
     try:
         conn.execute("ALTER TABLE users ADD COLUMN paid_credits INTEGER NOT NULL DEFAULT 0")
@@ -531,7 +531,7 @@ def apply_monthly_credit_refill(now: datetime | None = None) -> dict:
             conn,
             target,
             "monthly_refill",
-            f"월 기본 이용권 충전 ({period})",
+            f"월 기본 제공량 지급 ({period})",
         )
 
         conn.execute(
@@ -568,7 +568,7 @@ def admin_refill_credits_to_floor(target: int) -> dict:
             conn,
             target,
             "admin_refill",
-            "관리자 즉시 기본 이용권 충전",
+            "관리자 즉시 기본 제공량 지급",
         )
         conn.commit()
         return {

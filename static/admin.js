@@ -1038,7 +1038,7 @@ document.getElementById("monthly-refill-btn").addEventListener("click", async ()
   const input = document.getElementById("setting-monthly-refill-credits");
   const credits = parseInt(input.value, 10);
   if (isNaN(credits) || credits < 0) return;
-  if (!confirm(`이용권이 ${credits}개 미만인 모든 사용자를 ${credits}개까지 즉시 충전합니다. 계속하시겠습니까?`)) return;
+  if (!confirm(`이용권이 ${credits}개 미만인 모든 사용자를 ${credits}개까지 즉시 지급합니다. 계속하시겠습니까?`)) return;
 
   clearTimeout(_settingsSaveTimer);
   if (!await doSaveSettings()) {
@@ -1050,15 +1050,15 @@ document.getElementById("monthly-refill-btn").addEventListener("click", async ()
     const res = await fetch("/api/admin/credits/monthly-refill", { method: "POST" });
     if (res.ok) {
       const data = await res.json();
-      alert(`${data.affected_users}명에게 총 ${data.total_credits}개의 이용권을 충전했습니다.`);
+      alert(`${data.affected_users}명에게 총 ${data.total_credits}개의 이용권을 지급했습니다.`);
       loadUsers();
       loadAdminOverview();
     } else {
       const err = await res.json();
-      alert(err.error || "즉시 충전에 실패했습니다");
+      alert(err.error || "즉시 지급에 실패했습니다");
     }
   } catch {
-    alert("즉시 충전에 실패했습니다");
+    alert("즉시 지급에 실패했습니다");
   }
 });
 
