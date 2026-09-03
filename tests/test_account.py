@@ -211,7 +211,10 @@ def test_re_registering_does_not_hand_out_the_default_grant_again(tmp_path, monk
     )
     auth.delete_user_account(first["id"])
 
-    revived = auth.get_or_create_user("google-bye", "bye@example.com", "bye again", None)
+    revived = auth.get_or_create_user(
+        "google-bye", "bye@example.com", "bye again", None,
+        privacy_consent_version=auth.PRIVACY_CONSENT_VERSION,
+    )
 
     assert revived["id"] == first["id"]
     assert revived["deleted_at"] is None
@@ -219,8 +222,43 @@ def test_re_registering_does_not_hand_out_the_default_grant_again(tmp_path, monk
     assert revived["name"] == "bye again"
     # 반복해도 늘어나지 않는다.
     auth.delete_user_account(revived["id"])
-    again = auth.get_or_create_user("google-bye", "bye@example.com", "bye", None)
+    again = auth.get_or_create_user(
+        "google-bye", "bye@example.com", "bye", None,
+        privacy_consent_version=auth.PRIVACY_CONSENT_VERSION,
+    )
     assert again["credits"] == 0
+
+
+# 방침의 보유 기간은 "탈퇴 시까지"다. 그 동의는 끝났으니 재가입은 새 동의를 받아야
+# 되살아나고, 기록되는 동의도 예전 것이 아니라 지금 받은 것이어야 한다.
+def test_re_registering_requires_and_records_a_fresh_consent(tmp_path, monkeypatch):
+    _init_test_db(tmp_path, monkeypatch)
+    first = auth.get_or_create_user(
+        "google-bye", "bye@example.com", "bye", None,
+        privacy_consent_version=auth.PRIVACY_CONSENT_VERSION,
+    )
+    conn = auth._get_conn()
+    conn.execute(
+        "UPDATE users SET privacy_consent_at = '2020-01-01 00:00:00', privacy_consent_version = 'old' WHERE id = ?",
+        (first["id"],),
+    )
+    conn.commit()
+    conn.close()
+    auth.delete_user_account(first["id"])
+
+    # 동의 없이는 되살아나지 않고, 행도 그대로 탈퇴 상태다.
+    with pytest.raises(ValueError, match="privacy consent"):
+        auth.get_or_create_user("google-bye", "bye@example.com", "bye", None)
+    assert auth.get_user_by_google_id("google-bye")["deleted_at"] is not None
+
+    revived = auth.get_or_create_user(
+        "google-bye", "bye@example.com", "bye", None,
+        privacy_consent_version=auth.PRIVACY_CONSENT_VERSION,
+    )
+    assert revived["id"] == first["id"]
+    assert revived["deleted_at"] is None
+    assert revived["privacy_consent_version"] == auth.PRIVACY_CONSENT_VERSION
+    assert revived["privacy_consent_at"] != "2020-01-01 00:00:00"
 
 
 def test_a_withdrawn_account_leaves_the_admin_user_list(tmp_path, monkeypatch):
@@ -258,5 +296,8 @@ def test_a_withdrawn_account_is_not_refilled_or_bulk_adjusted(tmp_path, monkeypa
 
     auth.admin_bulk_set_credits(50)
 
-    revived = auth.get_or_create_user("google-bye", "bye@example.com", "bye", None)
+    revived = auth.get_or_create_user(
+        "google-bye", "bye@example.com", "bye", None,
+        privacy_consent_version=auth.PRIVACY_CONSENT_VERSION,
+    )
     assert revived["credits"] == 0

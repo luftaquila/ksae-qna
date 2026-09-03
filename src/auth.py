@@ -711,13 +711,33 @@ def get_or_create_user(
         "SELECT * FROM users WHERE google_id = ?", (google_id,)
     ).fetchone()
 
-    if row:
+    if row and row["deleted_at"]:
+        # 재가입.  방침의 보유 기간이 "탈퇴 시까지"라 예전 동의는 끝났으므로 새 동의
+        # 없이는 되살리지 않는다 — 콜백은 탈퇴한 행을 신규처럼 동의 화면으로 보낸다.
         # 되살아나는 계정에는 기본 지급 이용권을 주지 않는다.  탈퇴와 재가입을
         # 반복해 무료 지급분을 계속 받아내는 길을 막는 것이 행을 남기는 이유다.
+        if not privacy_consent_version:
+            conn.close()
+            raise ValueError("privacy consent is required to rejoin")
         conn.execute(
             """UPDATE users
                   SET email=?, name=?, picture=?, deleted_at=NULL,
+                      privacy_consent_at=datetime('now'), privacy_consent_version=?,
                       updated_at=datetime('now')
+                WHERE google_id=?""",
+            (email, name, picture, privacy_consent_version, google_id),
+        )
+        conn.commit()
+        user = dict(
+            conn.execute(
+                "SELECT * FROM users WHERE google_id = ?", (google_id,)
+            ).fetchone()
+        )
+    elif row:
+        # 살아 있는 계정은 프로필만 갱신한다.
+        conn.execute(
+            """UPDATE users
+                  SET email=?, name=?, picture=?, updated_at=datetime('now')
                 WHERE google_id=?""",
             (email, name, picture, google_id),
         )
