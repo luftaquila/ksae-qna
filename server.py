@@ -355,8 +355,11 @@ async def auth_callback(request: Request):
     token = await oauth.google.authorize_access_token(request)
     userinfo = token.get("userinfo")
 
+    # 탈퇴한 계정도 신규와 같은 길을 간다. 방침의 보유 기간이 "탈퇴 시까지"라 예전 동의는
+    # 끝났고, 재가입은 새 가입이다. 되살리는 것은 동의 라우트(signup_consent)의 일이다 —
+    # 여기서 되살리면 동의 화면이 생략돼 탈퇴 후 재로그인이 곧바로 채팅으로 들어간다.
     existing_user = get_user_by_google_id(userinfo["sub"])
-    if not existing_user:
+    if not existing_user or existing_user.get("deleted_at"):
         request.session["pending_signup"] = {
             "google_id": userinfo["sub"],
             "email": userinfo["email"],
